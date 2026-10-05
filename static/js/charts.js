@@ -2,14 +2,14 @@
 
 import { cssVar, seriesColor, rgba, fmt, quantile } from './util.js';
 
-const CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'] };
+const CONFIG = { responsive: true, displaylogo: false, displayModeBar: 'hover', modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'] };
 
 export function base(extra = {}) {
   const ink2 = cssVar('--ink-2'), grid = cssVar('--line');
   const axis = { gridcolor: grid, zerolinecolor: grid, linecolor: grid, tickfont: { color: ink2 }, automargin: true };
   return {
     paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-    font: { family: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif', color: ink2, size: 12 },
+    font: { family: '"Helvetica Neue", Helvetica, Arial, sans-serif', color: ink2, size: 12 },
     margin: { l: 58, r: 16, t: 34, b: 44 },
     xaxis: { ...axis }, yaxis: { ...axis },
     legend: { orientation: 'h', y: -0.2, font: { color: ink2 } },
@@ -34,7 +34,7 @@ export function plotPrice(div, res, opts) {
   }];
   for (const ma of mas) {
     traces.push({
-      x: p.dates, y: p.lines[ma], type: 'scattergl', mode: 'lines', name: `${ma}-bar line`,
+      x: p.dates, y: p.lines[ma], type: 'scattergl', mode: 'lines', name: `${ma}-day line`,
       line: { color: maColor(ma, mas), width: ma === mas[0] ? 2 : 1.4 },
       visible: hideLines.has(ma) ? 'legendonly' : true, hovertemplate: `%{y:,.2f}<extra>${ma}</extra>`,
     });
@@ -48,7 +48,7 @@ export function plotPrice(div, res, opts) {
         marker: { symbol: dir === 'support' ? 'triangle-up' : 'triangle-down', size: 8, color: maColor(ma, mas), line: { color: cssVar('--surface'), width: 1 } },
         visible: hideEvents.has(ma) ? 'legendonly' : true,
         customdata: ev.map((e) => [e.era, e.dist_atr, e.atr_ratio]),
-        hovertemplate: `<b>${ma} ${dir} test</b><br>%{x}<br>close %{y:,.2f}<br>%{customdata[0]} · ${'%{customdata[1]:.2f}'} ATR from line<extra></extra>`,
+        hovertemplate: `<b>${ma} ${dir} test</b><br>%{x}<br>close %{y:,.2f}<br>%{customdata[0]}, ${'%{customdata[1]:.2f}'} ATR from line<extra></extra>`,
       });
     }
   }
@@ -93,8 +93,8 @@ function pathLayout(res, titleText, yText) {
 }
 export function plotStudy(divs, res, pre) {
   const { offsets, series } = res.paths, mas = res.mas;
-  const yText = `Abnormal cumulative return from t−${pre}`;
-  [['support', 'Support tests (approach from above)'], ['resistance', 'Resistance tests (approach from below)'], ['pooled', 'Pooled, direction-adjusted (up = reacts as S/R predicts)']]
+  const yText = `Move vs a normal day (from day −${pre})`;
+  [['support', 'Price falling to the line (floor test)'], ['resistance', 'Price rising to the line (ceiling test)'], ['pooled', 'Both combined (up = reacts as a floor / ceiling would)']]
     .forEach(([key, t], i) => {
       const traces = mas.flatMap((ma) => pathTraces(series[ma][key], offsets, maColor(ma, mas), `${ma}`, `m${ma}`));
       if (!traces.length) { divs[i].innerHTML = '<p class="note" style="padding:20px">No events in this group.</p>'; return; }
@@ -105,7 +105,7 @@ export function plotStudyByEra(div, res, ma, pre) {
   const { offsets, series } = res.paths;
   const traces = res.eras.flatMap((er, i) => pathTraces(series[ma].era[er.name], offsets, seriesColor(i), `${er.name} ${er.desc}`, `e${i}`));
   if (!traces.length) { div.innerHTML = '<p class="note" style="padding:20px">No events.</p>'; return; }
-  draw(div, traces, pathLayout(res, `${ma}-bar line, pooled and direction-adjusted, by era`, `Abnormal cumulative return from t−${pre}`));
+  draw(div, traces, pathLayout(res, `${ma}-day line, by time period`, `Move vs a normal day (from day −${pre})`));
 }
 
 // ------------------------------------------------------------------ eras
@@ -129,11 +129,11 @@ function barTraces(res, horizon, kind) {
 }
 export function plotEraBars(divs, res, control, horizon) {
   const lay = (t, y, extra = {}) => merge(base(), { height: 340, title: title(t), barmode: 'group', bargap: 0.25, yaxis: { title: { text: y }, ticksuffix: '%' }, ...extra });
-  draw(divs.bounce, barTraces(res, horizon, 'bounce'), lay(`Bounce rate at ${horizon} bars (Wilson 95% CI)`, 'Bounce rate', {
+  draw(divs.bounce, barTraces(res, horizon, 'bounce'), lay(`How often price bounced away (judged ${horizon} days later)`, 'Bounce rate', {
     shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 50, y1: 50, line: { color: cssVar('--ink-3'), dash: 'dash', width: 1 } }] }));
-  draw(divs.car, barTraces(res, horizon, 'car'), lay(`Direction-adjusted CAR at ${horizon} bars (95% CI of mean)`, 'Mean CAR'));
+  draw(divs.car, barTraces(res, horizon, 'car'), lay(`Average move afterwards (${horizon} days), in the expected direction`, 'Average move'));
   const comp = res.comparisons[control];
-  for (const [key, kind, t] of [['gapBounce', 'bounce', 'Bounce-rate gap'], ['gapCar', 'car', 'CAR gap']]) {
+  for (const [key, kind, t] of [['gapBounce', 'bounce', 'Difference in bounce rate'], ['gapCar', 'car', 'Difference in average move']]) {
     if (!comp) { divs[key].innerHTML = '<p class="note" style="padding:20px">Add a control line to compare.</p>'; continue; }
     const rows = eraCats(res).map((c) => comp.find((r) => r.era === c && r.metric === kind && r.horizon === horizon));
     const y = rows.map((r) => (r && r.diff != null ? 100 * r.diff : null));
@@ -143,8 +143,8 @@ export function plotEraBars(divs, res, control, horizon) {
       type: 'bar', x: eraTick(res), y, marker: { color: seriesColor(0), line: { color: cssVar('--surface'), width: 1.5 } },
       error_y: { type: 'data', symmetric: false, array: up, arrayminus: dn, color: cssVar('--ink-2'), thickness: 1, width: 3 },
       customdata: rows.map((r) => (r ? [r.boot_p, r.welch_p, r.mwu_p, r.n_target, r.n_control] : [])),
-      hovertemplate: '%{x}<br>gap %{y:.2f} pp<br>bootstrap p=%{customdata[0]:.4f}<br>Welch p=%{customdata[1]:.4f} · MWU p=%{customdata[2]:.4f}<br>n %{customdata[3]} vs %{customdata[4]}<extra></extra>',
-    }], merge(base(), { height: 340, title: title(`${res.mas[0]} minus ${control}: ${t} at ${horizon} bars (year-cluster bootstrap 95% CI)`), yaxis: { title: { text: `${t} (pp)` } }, showlegend: false,
+      hovertemplate: '%{x}<br>gap %{y:.2f} pp<br>bootstrap p=%{customdata[0]:.4f}<br>Welch p=%{customdata[1]:.4f}, MWU p=%{customdata[2]:.4f}<br>n %{customdata[3]} vs %{customdata[4]}<extra></extra>',
+    }], merge(base(), { height: 340, title: title(`${res.mas[0]}-day minus ${control}-day: ${t.toLowerCase()} (${horizon} days)`), yaxis: { title: { text: `${t} (pp)` } }, showlegend: false,
       shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0, line: { color: cssVar('--ink-3'), width: 1 } }] }));
   }
 }
@@ -175,7 +175,7 @@ export function plotScan(divLine, divHist, scan, o) {
     shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: med, y1: med, line: { color: cssVar('--ink-3'), dash: 'dash', width: 1 } });
   }
   shapes.push({ type: 'rect', x0: scan.target - exclude, x1: scan.target + exclude, yref: 'paper', y0: 0, y1: 1, fillcolor: rgba('#2a78d6', 0.06), line: { width: 0 }, layer: 'below' });
-  draw(divLine, traces, merge(base(), { height: 420, title: title(`${yText} by line length — ${era === 'All' ? 'full sample' : era}, ${horizon}-bar horizon`), xaxis: { title: { text: 'Line length (bars)' } }, yaxis: { title: { text: yText }, ticksuffix: '%' }, shapes, legend: { orientation: 'h', y: -0.22 } }));
+  draw(divLine, traces, merge(base(), { height: 420, title: title(`${yText} by line length: ${era === 'All' ? 'full sample' : era}, ${horizon}-day horizon`), xaxis: { title: { text: 'Line length (days)' } }, yaxis: { title: { text: yText }, ticksuffix: '%' }, shapes, legend: { orientation: 'h', y: -0.22 } }));
 
   // histogram of other lines with target marked
   const histTraces = [{ x: vals.map((v) => scale * v), type: 'histogram', name: 'Other lines', marker: { color: cssVar('--ink-3') }, opacity: 0.75, nbinsx: 24, hovertemplate: '%{x:.2f}%: %{y} lines<extra></extra>' }];
@@ -202,7 +202,7 @@ export function plotEventWindow(div, win, ev, direction, horizons, cfg) {
     { x, y: win.lower, type: 'scatter', mode: 'lines', line: { width: 0 }, fill: 'tonexty', fillcolor: rgba('#2a78d6', 0.16), name: `Touch band (±${cfg.band} ATR)`, hoverinfo: 'skip' },
     { x, open: win.open, high: win.high, low: win.low, close: win.close, type: 'candlestick', name: 'Price',
       increasing: { line: { color: dark }, fillcolor: cssVar('--surface') }, decreasing: { line: { color: dark }, fillcolor: dark } },
-    { x, y: win.sma, type: 'scatter', mode: 'lines', name: `${ev.ma}-bar line`, line: { color: seriesColor(0), width: 2.2 } },
+    { x, y: win.sma, type: 'scatter', mode: 'lines', name: `${ev.ma}-day line`, line: { color: seriesColor(0), width: 2.2 } },
     { x, y: win.breach, type: 'scatter', mode: 'lines', name: `Failure level (${direction === 'support' ? '−' : '+'}${cfg.breach} ATR)`, line: { color: seriesColor(1), width: 1.5, dash: 'dash' } },
   ];
   const marks = horizons.filter((k) => i0 + k < x.length);

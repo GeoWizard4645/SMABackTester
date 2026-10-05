@@ -9,7 +9,7 @@ An interactive research workbench with two labs, a command-line pipeline behind 
 | **SMA Lab** | Is the 200-day moving average a *self-fulfilling* support/resistance level — i.e. does price react to it more than to a line nobody watches, and more so in the modern era? |
 | **Kalshi 15m Lab** | Do retail traders systematically overprice "Yes" on Kalshi's 15-minute crypto contracts, so that simply buying "No" is profitable after fees? |
 
-Live site: **vivaanshahani.com/FinanceProjectTests** (see [Deploying](#3-deploying-to-vivaanshahanicomfinanceprojecttests)).
+Live site: **financetests.vivaanshahani.com** (see [Deploying](#3-deploying-to-cloudflare)).
 
 ---
 
@@ -68,43 +68,45 @@ pytest -q tests
 ```
 
 * **One Python code base, two ways to run it.** `service.py` / `kalshi_lab/web.py` turn a JSON config into JSON results. `app.py` calls them natively; the public site loads the identical files into Pyodide (Python 3.14 + pandas + SciPy compiled to WebAssembly) inside a Web Worker. Results agree to the last digit across engines.
-* **Static hosting works.** The production site is only static files plus a tiny data proxy — no Python server. Every URL in the page is relative, so it works under any sub-path such as `/FinanceProjectTests/`.
+* **Static hosting works.** The production site is one HTML file plus a tiny data proxy — no Python server. Every URL in the page is relative, so it works at a domain root or under any sub-path.
 * **Why a proxy?** Browsers cannot call Yahoo Finance directly (no CORS headers), and Kalshi answers `403` to any request carrying a browser `Origin` header. The proxy forwards a small allowlist of read-only `GET` requests from the server side.
 
 ---
 
-## 3. Deploying to vivaanshahani.com/FinanceProjectTests
+## 3. Deploying to Cloudflare
 
-The site is **static files + one Cloudflare Worker (the data proxy)**.
+The site is **one HTML file + one Cloudflare Worker (the data proxy)**.
 
-### Step 1 — build the site folder
+### Step 1 — build
 
 ```bash
 python build_static.py
 ```
 
-This produces:
+This needs Node (it bundles the JavaScript with esbuild) and produces:
 
 ```
 dist/
-  FinanceProjectTests/     <- the website folder (index.html, static/, py/)
-  cloudflare/              <- worker.js, wrangler.toml, test_worker.mjs
-  functions/               <- the same proxy as a Cloudflare *Pages Function* (alternative to the Worker)
+  index.html      <- THE WEBSITE: styles, scripts, Python sources and the maths page are all inside this one file
+  cloudflare/     <- worker.js, wrangler.toml, test_worker.mjs (the data proxy)
+  functions/      <- the same proxy as a Cloudflare Pages Function (alternative to the Worker)
 ```
 
-Rehearse production locally (static files under the exact sub-path, in-browser Python, proxy only):
+Because everything is inside `index.html`, publishing that single file is enough — there is nothing else to forget to upload. (An earlier version was split into `static/` and `py/` folders; when only `index.html` was uploaded the page showed up unstyled and empty. `python build_static.py --multi` still writes that multi-file layout to `dist/site/` if you want it.)
+
+Rehearse production locally (serves **only** `dist/index.html`, 404 for everything else, plus the proxy):
 
 ```bash
-python serve_dist.py        # http://127.0.0.1:5001/FinanceProjectTests/
+python serve_dist.py        # http://127.0.0.1:5001/   (add --prefix /FinanceProjectTests to test a sub-path)
 ```
 
-### Step 2 — publish the folder
+### Step 2 — publish the page
 
-Copy `dist/FinanceProjectTests/` into your website project so that `FinanceProjectTests/index.html` sits at the site root, then deploy the site as you normally do (Cloudflare Pages, git push, etc.). Visiting `/FinanceProjectTests` without the trailing slash is redirected for you.
+Put `dist/index.html` at the root of the site served at `financetests.vivaanshahani.com` (for a Cloudflare Pages project: make it the only file in the build output, or the `index.html` in the published folder) and deploy as usual. The page also works under a sub-path such as `/FinanceProjectTests/`; a missing trailing slash is redirected for you.
 
 ### Step 3 — deploy the proxy (pick **one**)
 
-**A. Cloudflare Worker (recommended — works whatever hosts the static files)**
+**A. Cloudflare Worker (recommended)**
 
 ```bash
 cd dist/cloudflare            # or ./cloudflare in the repo
@@ -112,24 +114,25 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-`wrangler.toml` binds the Worker to the route `vivaanshahani.com/FinanceProjectTests/api/proxy/*` (the zone must be on your Cloudflare account). If you use a different path, change `BASE` in `worker.js` and the route in `wrangler.toml` together.
+`wrangler.toml` binds the Worker to `financetests.vivaanshahani.com/api/proxy/*` and `vivaanshahani.com/FinanceProjectTests/api/proxy/*` (delete the one you do not use). The Worker only looks for the `/api/proxy/` marker in the path, so it works under any hostname or prefix.
 
-**B. Cloudflare Pages Function** — if the site is a Pages project, copy `dist/functions/` into the project root. It serves the same route from the same code.
+**B. Cloudflare Pages Function** — if the site is a Pages project, copy `dist/functions/` into the project root (next to the files Pages publishes). It serves `/api/proxy/*` from the same code.
 
 ### Step 4 — verify
 
-1. Open `https://vivaanshahani.com/FinanceProjectTests/` and press **Run the default test**. The first visit downloads the Python runtime (~30 MB from the jsDelivr CDN; cached afterwards).
-2. In DevTools → Network you should see `api/proxy/yahoo?...` return JSON.
-3. Test the proxy logic against the live APIs: `node cloudflare/test_worker.mjs` (10 checks).
-4. Switch to **Kalshi 15m Lab** and run a study with the *Live Kalshi only* source.
+1. `https://financetests.vivaanshahani.com/api/proxy/yahoo?symbol=AAPL&period1=1700000000&period2=1790000000` should return JSON (not a 404 page).
+2. Open the site and press **Run**. The first visit downloads the Python runtime (~30 MB from the jsDelivr CDN; cached afterwards).
+3. `node cloudflare/test_worker.mjs` checks the proxy logic against the live APIs (11 checks).
+4. Switch to **Kalshi 15-minute test** and run it with *Real data only*.
 
 ### Things to know
 
-* **Upstream blocking is the main risk.** Yahoo and Kalshi may treat Cloudflare's IP ranges differently from a laptop. I could verify the proxy from a normal network but not from Cloudflare's. If Yahoo blocks you, upload a CSV in the SMA Lab ("Upload CSV…"); the Kalshi lab's default *auto* source falls back to a clearly labelled synthetic dataset instead of failing.
-* **Content-Security-Policy.** If the site sets a CSP it must allow `cdn.jsdelivr.net` and `cdn.plot.ly` for scripts, `connect-src` to `cdn.jsdelivr.net`, `worker-src 'self'`, and `script-src 'wasm-unsafe-eval'` (WebAssembly).
+* **If the page looks unstyled or its inputs are empty**, the HTML was served without its scripts, or the proxy is missing: check the browser console and the URL in step 4.1.
+* **Upstream blocking and rate limits are the main risk.** Yahoo and Kalshi may treat Cloudflare's IP ranges differently from a laptop, and Kalshi answers HTTP 429 to bursts of requests, so the Kalshi study paces its requests (about 3 per second) and backs off when throttled (a 7-day pull takes ~30 s). If Yahoo blocks you, use "upload your own CSV"; the Kalshi tool's default *real data (else simulated)* falls back to a clearly labelled synthetic dataset instead of failing.
+* **Content-Security-Policy.** If the site sets a CSP it must allow `cdn.jsdelivr.net` and `cdn.plot.ly` for scripts, `connect-src` to `cdn.jsdelivr.net`, `worker-src blob:`, and `script-src 'wasm-unsafe-eval'` (WebAssembly).
 * **Third-party CDNs** are used for Plotly, KaTeX and Pyodide. Pin or self-host them if you need offline or locked-down operation.
-* **Rate limits.** The Worker caches responses (Yahoo 1 h, Kalshi 60 s, Coinbase 5 min), which keeps repeated runs cheap.
-* **Updating.** Re-run `python build_static.py` and re-publish the folder; the Worker only changes if `cloudflare/worker.js` does.
+* **Caching.** The Worker caches successful responses (Yahoo 1 h, Kalshi 60 s, Coinbase 5 min) and never caches errors.
+* **Updating.** Re-run `python build_static.py` and re-publish `dist/index.html`; the Worker only changes if `cloudflare/worker.js` does.
 
 ---
 
@@ -157,7 +160,7 @@ The control line is the key design choice. Any smoothed line looks like support 
 | Event rules | Touch band, breach distance, approach length, de-clustering gap, ATR window, plot window, any set of forward horizons, breach test on closes or intraday, support only / resistance only / both |
 | Statistics | Bootstrap replications and seed |
 
-Tabs: **Overview** (plain-language verdicts + scoreboard), **Price & events**, **Event study**, **Eras**, **Tables** (CSV export), **Line scan**, **Event explorer** (click any event to see candles and the definition checked step by step), and **Method & math**.
+The page is one column: the inputs at the top (with advanced options under *More settings*) and the results below in six tabs — **Summary** (plain-language verdicts), **Charts** (by time period, what happens after a touch, price with touches), **Tables** (CSV export), **Try every line** (the line scan), **Each touch** (click any touch to see its candles and the definition checked step by step) and **How it works**.
 
 ### 4.3 The math
 
@@ -314,9 +317,9 @@ Data source (live / auto / synthetic), which 15-minute market (BTC, ETH, SOL, XR
 | `bridge.py` | Dispatch layer the browser worker calls |
 | `appmeta.py` | Ticker presets, list of Python files for the browser, proxy allowlist |
 | `kalshi_lab/` | `kalshi_data.py`, `calibration.py`, `backtest.py`, `stats.py`, `plot.py`, `main.py` (CLI), `web.py` (browser entry points + console), `requirements.txt` |
-| `static/` | `index.html`, `style.css`, `method.html`, `js/` (`main`, `kalshi`, `controls`, `charts`, `tables`, `engine`, `pyworker`, `util`) |
+| `static/` | Page source: `index.html`, `style.css`, `method.html`, `js/` (`main`, `kalshi`, `controls`, `charts`, `tables`, `engine`, `pyworker`, `util`). `build_static.py` inlines all of it into one file |
 | `cloudflare/` | `worker.js` (data proxy), `wrangler.toml`, `test_worker.mjs` |
-| `build_static.py`, `serve_dist.py` | Build the deployable folder; serve it under the production sub-path |
+| `build_static.py`, `serve_dist.py` | Build the single-file site (`dist/index.html`); rehearse production locally |
 | `tests/` | 28 pytest tests (indicators, events, statistics, fees, backtest arithmetic, API validation, end-to-end) |
 
 ---

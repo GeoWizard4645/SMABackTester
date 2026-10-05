@@ -74,7 +74,7 @@ def _forward(url: str, ttl: int) -> Response:
     except requests.RequestException as exc:
         return jsonify({"error": f"upstream unreachable: {exc}"}), 502
     resp = Response(r.content, status=r.status_code, mimetype="application/json")
-    resp.headers["Cache-Control"] = f"public, max-age={ttl}"
+    resp.headers["Cache-Control"] = f"public, max-age={ttl}" if r.ok else "no-store"
     return resp
 
 

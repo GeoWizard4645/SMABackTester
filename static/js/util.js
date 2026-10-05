@@ -43,11 +43,7 @@ const SERIES = {
   light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948', '#7a7974'],
   dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#a8a79d'],
 };
-export function isDark() {
-  const t = document.documentElement.dataset.theme;
-  if (t) return t === 'dark';
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
-}
+export function isDark() { return false; }
 export const seriesColor = (i) => SERIES[isDark() ? 'dark' : 'light'][i % 9];
 export const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 export function rgba(hex, a) {
@@ -56,6 +52,17 @@ export function rgba(hex, a) {
   const n = parseInt(m[1], 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
+
+// ------------------------------------------------------------------ assets (inlined in the single-file build)
+/** Text of an inlined <script>/<template> with this id, else fetched from `url`. */
+export async function loadText(id, url) {
+  const el = document.getElementById(id);
+  if (el) return el.tagName === 'TEMPLATE' ? el.innerHTML : el.textContent;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`could not load ${url} (${res.status})`);
+  return res.text();
+}
+export const loadJson = async (id, url) => JSON.parse(await loadText(id, url));
 
 // ------------------------------------------------------------------ network
 export async function api(path, body) {

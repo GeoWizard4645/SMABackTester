@@ -19,16 +19,18 @@ export function initKalshi(root, meta) {
   S.root = root;
   clear(root);
   root.append(
-    h('div', { class: 'layout' },
-      h('aside', { class: 'sidebar' },
-        h('div', { class: 'side-scroll' }, ...cards()),
-        h('div', { class: 'side-foot' },
-          h('button', { class: 'btn primary big', id: 'k-run', type: 'button', onclick: runStudy }, 'Run study'),
+    h('div', { class: 'page' },
+      h('p', { class: 'lead' }, 'Are “Yes” contracts on Kalshi’s 15-minute crypto markets overpriced? Choose a market and press Run to see how often “Yes” won at each price, and whether always buying “No” would have paid.'),
+      h('section', { class: 'card inputs' },
+        h('div', { class: 'form-grid' }, ...basics()),
+        h('details', { class: 'adv' }, h('summary', {}, 'More settings'), h('div', { class: 'adv-body' }, ...advanced())),
+        h('div', { class: 'runrow' },
+          h('button', { class: 'btn primary big', id: 'k-run', type: 'button', onclick: runStudy }, 'Run'),
           h('button', { class: 'btn ghost', type: 'button', onclick: () => { apply(meta.defaults); toast('Reset to defaults.'); } }, 'Reset'),
-          h('div', { class: 'status', id: 'k-status', role: 'status' }))),
-      h('main', { class: 'main' },
+          h('span', { class: 'status', id: 'k-status', role: 'status' }))),
+      h('section', { class: 'output' },
         h('nav', { class: 'tabs', id: 'k-tabs' },
-          ...[['results', 'Results'], ['console', 'Python console'], ['notes', 'Method & caveats']].map(([k, t]) => h('button', { 'data-tab': k, class: k === 'results' ? 'active' : '', type: 'button', onclick: () => tab(k) }, t))),
+          ...[['results', 'Results'], ['console', 'Python console'], ['notes', 'How it works']].map(([key, t]) => h('button', { 'data-tab': key, class: key === 'results' ? 'active' : '', type: 'button', onclick: () => tab(key) }, t))),
         h('section', { class: 'panel active', id: 'k-results' }, intro()),
         h('section', { class: 'panel', id: 'k-console' }),
         h('section', { class: 'panel', id: 'k-notes' }))));
@@ -40,55 +42,68 @@ export function initKalshi(root, meta) {
   S.root.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && S.tab === 'results') runStudy(); });
 }
 
-const field = (label, input, hint) => h('div', {}, h('label', { class: 'lbl' }, label, hint ? h('span', { class: 'hint' }, ` ${hint}`) : null), input);
+const field = (label, input, hint) => h('div', { class: 'f' }, h('label', { class: 'lbl' }, label, hint ? h('span', { class: 'hint' }, ` ${hint}`) : null), input);
 const num = (id, min, max, step = 'any') => h('input', { id, type: 'number', min, max, step });
 const sel = (id, opts) => h('select', { id }, opts.map(([v, t]) => h('option', { value: v }, t)));
 const card = (n, titleText, open, ...kids) => h('details', { class: 'card', open: open ? '' : null }, h('summary', {}, h('span', { class: 'step' }, n), titleText), h('div', { class: 'card-body' }, ...kids));
 
-function cards() {
-  const series = Object.entries(S.meta.series).map(([k, n]) => [k, `${k} · ${n}`]);
+function basics() {
+  const series = Object.entries(S.meta.series).map(([k, n]) => [k, `${n} (${k})`]);
   return [
-    card(1, 'Data', true,
-      field('Data source', sel('k-source', [['auto', 'Live Kalshi, else synthetic'], ['live', 'Live Kalshi only'], ['synthetic', 'Synthetic (simulated)']])),
-      field('Which 15-minute market', sel('k-series', series)),
-      h('div', { class: 'grid2' }, field('Last N days', num('k-days', 0.25, 90, 'any')), field('Max contracts', num('k-max', 50, 3000, 50))),
-      h('div', { class: 'grid2' }, field('Start (UTC)', h('input', { id: 'k-start', type: 'date' }), '(optional)'), field('End (UTC)', h('input', { id: 'k-end', type: 'date' }), '(optional)')),
-      h('p', { class: 'help' }, 'Live data comes from Kalshi’s public API (contracts, 1-minute quotes) and Coinbase (spot). Dates override “last N days”. About 96 contracts per day.')),
-    card(2, 'Timing: when do you look?', true,
-      h('label', { class: 'lbl' }, 'Checkpoints to extract', h('span', { class: 'hint' }, ' minutes before expiry')),
-      h('div', { class: 'chips toggle', id: 'k-cps' }),
-      field('Entry checkpoint (the price you trade at)', sel('k-entry', [])),
-      field('Price used', sel('k-pricesrc', [['trade', 'Last trade'], ['mid', 'Bid/ask midpoint'], ['executable', 'Executable (pay the ask / hit the bid)']])),
-      h('div', { class: 'grid2' }, field('Expiry hour from (UTC)', sel('k-hlo', [['', 'any'], ...Array.from({ length: 24 }, (_, i) => [String(i), `${String(i).padStart(2, '0')}:00`])])), field('…to', sel('k-hhi', [['', 'any'], ...Array.from({ length: 24 }, (_, i) => [String(i), `${String(i).padStart(2, '0')}:59`])]))),
-      h('label', { class: 'lbl' }, 'Weekdays (by expiry)'),
-      h('div', { class: 'chips toggle', id: 'k-days-chips' })),
-    card(3, 'Strikes & bins', false,
-      field('Upside / downside measured against', sel('k-spotref', [['checkpoint', 'Spot at the entry checkpoint (meaningful)'], ['open', 'Spot at market open (strike ≈ spot: noise)']])),
-      h('div', { class: 'grid2' }, field('Bin width (¢)', sel('k-bin', [['5', '5'], ['10', '10'], ['20', '20']])), field('p-value test', sel('k-ptest', [['twoprop', 'Two-proportion z'], ['binomial', 'Exact binomial'], ['pbinom', 'Poisson-binomial z']]))),
-      h('label', { class: 'cb-line' }, h('input', { id: 'k-tails', type: 'checkbox' }), ' Include <10¢ and >90¢ tails')),
-    card(4, 'Strategy rules & fees', false,
-      h('label', { class: 'cb-line' }, h('input', { id: 'k-r1', type: 'checkbox' }), ' Rule 1: Buy No on every contract'),
-      h('label', { class: 'cb-line' }, h('input', { id: 'k-r2', type: 'checkbox' }), ' Rule 2: Buy No on upside strikes only'),
-      h('label', { class: 'cb-line' }, h('input', { id: 'k-r3', type: 'checkbox' }), ' Rule 3: Buy No when Yes is between…'),
-      h('div', { class: 'grid2' }, field('Min Yes price (¢)', num('k-min', 0, 100, 1)), field('Max Yes price (¢)', num('k-max-price', 0, 100, 1))),
-      h('label', { class: 'cb-line' }, h('input', { id: 'k-c-on', type: 'checkbox' }), ' Custom rule'),
-      h('div', { class: 'grid2' }, field('Side', sel('k-c-side', [['no', 'Buy No'], ['yes', 'Buy Yes']])), field('Strikes', sel('k-c-dir', [['', 'any'], ['upside', 'upside only'], ['downside', 'downside only']]))),
-      h('div', { class: 'grid2' }, field('Yes from (¢)', num('k-c-min', 0, 100, 1)), field('Yes to (¢)', num('k-c-max', 0, 100, 1))),
-      h('div', { class: 'grid2' }, field('Contracts per trade', num('k-contracts', 1, 10000, 1)), field('Starting capital ($)', num('k-capital', 1, 1e9, 'any'))),
-      field('Fee schedule', sel('k-fee', [['taker', 'Taker: 0.07 · P(1−P)'], ['half', 'Half: 0.035'], ['maker', 'Maker-like: 0.0175'], ['none', 'No fees'], ['custom', 'Custom…']])),
-      h('div', { id: 'k-fee-custom-wrap', hidden: '' }, field('Fee rate', num('k-fee-custom', 0, 1, 'any')))),
-    card(5, 'Synthetic data knobs', false,
-      h('p', { class: 'help' }, 'Only used when the source is synthetic (or live data is unavailable). The overpricing is PLANTED, so you can see whether the tests detect it. Set both premiums to 0 for a perfectly calibrated market.'),
-      h('div', { class: 'grid2' }, field('Optimism premium (¢)', num('k-bias', -20, 20, 'any')), field('Extra on upside strikes (¢)', num('k-upx', -20, 20, 'any'))),
-      h('div', { class: 'grid2' }, field('Price noise (¢ sd)', num('k-noise', 0, 20, 'any')), field('Random seed', num('k-seed', 0, 2147483647, 1)))),
+    h('div', { class: 'f span2' }, field('Market', sel('k-series', series))),
+    field('Data', sel('k-source', [['auto', 'Real data (else simulated)'], ['live', 'Real data only'], ['synthetic', 'Simulated data']])),
+    field('Days of history', num('k-days', 0.25, 90, 'any')),
+    field('Buy this many minutes before expiry', sel('k-entry', [])),
+    field('Price to use', sel('k-pricesrc', [['trade', 'Last trade'], ['mid', 'Midpoint of bid and ask'], ['executable', 'What you would really pay (the ask)']])),
+    field('Rule 3: “Yes” price from (¢)', num('k-min', 0, 100, 1)),
+    field('…to (¢)', num('k-max-price', 0, 100, 1)),
+    field('Fees', sel('k-fee', [['taker', 'Kalshi taker fee'], ['half', 'Half the taker fee'], ['maker', 'Maker-like fee'], ['none', 'No fees'], ['custom', 'Custom…']])),
+    h('div', { id: 'k-fee-custom-wrap', hidden: '' }, field('Fee rate', num('k-fee-custom', 0, 1, 'any'))),
+    field('Contracts per trade', num('k-contracts', 1, 10000, 1)),
+  ];
+}
+
+function advanced() {
+  return [
+    h('h3', {}, 'Dates'),
+    h('div', { class: 'form-grid' },
+      field('From (UTC)', h('input', { id: 'k-start', type: 'date' }), 'overrides “days”'), field('To (UTC)', h('input', { id: 'k-end', type: 'date' })),
+      field('Most contracts to load', num('k-max', 50, 3000, 50))),
+    h('h3', {}, 'Timing'),
+    h('label', { class: 'lbl' }, 'Minutes before expiry to record prices', h('span', { class: 'hint' }, ' (the buy time above must be one of these)')),
+    h('div', { class: 'chips toggle', id: 'k-cps' }),
+    h('div', { class: 'form-grid' },
+      field('Only contracts expiring from (UTC hour)', sel('k-hlo', [['', 'any'], ...Array.from({ length: 24 }, (_, i) => [String(i), `${String(i).padStart(2, '0')}:00`])])),
+      field('…until', sel('k-hhi', [['', 'any'], ...Array.from({ length: 24 }, (_, i) => [String(i), `${String(i).padStart(2, '0')}:59`])]))),
+    h('label', { class: 'lbl' }, 'Weekdays', h('span', { class: 'hint' }, ' (none selected = every day)')),
+    h('div', { class: 'chips toggle', id: 'k-days-chips' }),
+    h('h3', {}, 'Strikes and bins'),
+    h('div', { class: 'form-grid' },
+      field('Up / down means strike vs spot…', sel('k-spotref', [['checkpoint', 'at the buy time (recommended)'], ['open', 'at market open']])),
+      field('Price bin width (¢)', sel('k-bin', [['5', '5'], ['10', '10'], ['20', '20']])),
+      field('p-value test', sel('k-ptest', [['twoprop', 'Two-proportion z'], ['binomial', 'Exact binomial'], ['pbinom', 'Poisson-binomial z']]))),
+    h('label', { class: 'cb-line' }, h('input', { id: 'k-tails', type: 'checkbox' }), ' Also show prices under 10¢ and over 90¢'),
+    h('h3', {}, 'Strategies to test'),
+    h('label', { class: 'cb-line' }, h('input', { id: 'k-r1', type: 'checkbox' }), ' Rule 1: buy “No” on every contract'),
+    h('label', { class: 'cb-line' }, h('input', { id: 'k-r2', type: 'checkbox' }), ' Rule 2: buy “No” only when the strike is above spot'),
+    h('label', { class: 'cb-line' }, h('input', { id: 'k-r3', type: 'checkbox' }), ' Rule 3: buy “No” only when “Yes” is inside the price range above'),
+    h('label', { class: 'cb-line' }, h('input', { id: 'k-c-on', type: 'checkbox' }), ' Your own rule'),
+    h('div', { class: 'form-grid' },
+      field('Buy', sel('k-c-side', [['no', '“No”'], ['yes', '“Yes”']])), field('When the strike is', sel('k-c-dir', [['', 'anything'], ['upside', 'above spot'], ['downside', 'below spot']])),
+      field('and “Yes” costs from (¢)', num('k-c-min', 0, 100, 1)), field('…to (¢)', num('k-c-max', 0, 100, 1))),
+    h('div', { class: 'form-grid', style: 'margin-top:12px' }, field('Starting capital ($)', num('k-capital', 1, 1e9, 'any'))),
+    h('h3', {}, 'Simulated data only'),
+    h('p', { class: 'help' }, 'Used when the data is simulated. The overpricing is planted on purpose so you can see whether the tests find it. Set both premiums to 0 for a perfectly fair market.'),
+    h('div', { class: 'form-grid' },
+      field('Overpricing of “Yes” (¢)', num('k-bias', -20, 20, 'any')), field('Extra when strike is above spot (¢)', num('k-upx', -20, 20, 'any')),
+      field('Price noise (¢)', num('k-noise', 0, 20, 'any')), field('Random seed', num('k-seed', 0, 2147483647, 1))),
   ];
 }
 
 const intro = () => h('div', { class: 'empty' },
-  h('h2', {}, 'Do retail traders overprice “Yes” on Kalshi’s 15-minute crypto contracts?'),
-  h('p', {}, 'This lab pulls settled 15-minute up/down contracts, checks how often “Yes” really won at each price, and backtests simply buying “No” after Kalshi’s fees. It runs real Python (pandas, SciPy) inside your browser.'),
-  h('p', {}, h('button', { class: 'btn primary big', type: 'button', onclick: runStudy }, 'Run the study')),
-  h('p', { class: 'note' }, 'The first run downloads the Python runtime (about 30 MB, cached afterwards). Change anything on the left and run again, or open the Python console to write your own analysis.'));
+  h('h2', {}, 'No results yet'),
+  h('p', {}, 'This loads finished 15-minute contracts, checks how often “Yes” really won at each price, then tests a plain “buy No” strategy after Kalshi’s fees.'),
+  h('p', { class: 'note' }, 'The first run downloads a Python engine (about 30 MB, then cached). Change any number above and run again.'));
 
 // ------------------------------------------------------------------ wiring & params
 function renderChips() {
@@ -201,26 +216,26 @@ function renderResults() {
   const calHost = h('div');
 
   root.append(h('div', { class: 'block' },
-    h('h2', {}, `${s.series} — ${S.meta.series[s.series]} 15-minute contracts`),
+    h('h2', {}, `${s.series}: ${S.meta.series[s.series]} 15-minute contracts`),
     h('p', { class: 'sub' }, h('span', { class: 'badge ' + (live ? 'live' : 'syn') }, live ? 'LIVE DATA' : 'SYNTHETIC DATA'),
-      ` ${s.markets.toLocaleString()} settled contracts, ${s.priced.toLocaleString()} with a ${s.entry_checkpoint}-minute price · ${s.start} → ${s.end} UTC · price = ${s.price_source}`),
+      ` ${s.markets.toLocaleString()} settled contracts, ${s.priced.toLocaleString()} with a ${s.entry_checkpoint}-minute price, ${s.start} to ${s.end} UTC, price = ${s.price_source}`),
     h('div', {}, pill(`avg Yes price ${s.overall_avg_yes.toFixed(1)}¢`), pill(`Yes won ${(100 * s.overall_yes_rate).toFixed(1)}%`),
       pill(`gap ${gapTxt(s.overall_avg_yes - 100 * s.overall_yes_rate)}`),
-      pill(`upside ${s.directions.upside || 0} · downside ${s.directions.downside || 0}`)),
+      pill(`upside ${s.directions.upside || 0}, downside ${s.directions.downside || 0}`)),
     s.notes.length ? h('div', { class: 'callout warn' }, h('ul', { class: 'warnlist' }, s.notes.map((n) => h('li', {}, n)))) : null,
     h('p', { class: 'note' }, 'Gap = average Yes price minus the share of contracts that actually resolved Yes. Positive means Yes was overpriced. The 45° line on the chart is a perfectly calibrated market.')));
 
-  root.append(h('div', { class: 'block' }, h('h2', {}, '1 · Overpricing test: calibration'), calChart,
+  root.append(h('div', { class: 'block' }, h('h2', {}, '1, Overpricing test: calibration'), calChart,
     h('div', { class: 'seg small', id: 'k-split', style: 'margin:10px 0' }, ['all', 'upside', 'downside'].map((k) => h('button', { type: 'button', class: S.split === k ? 'on' : '', onclick: () => { S.split = k; renderResults(); } }, k === 'all' ? 'All contracts' : `${k[0].toUpperCase()}${k.slice(1)} strikes`))),
     calHost, interpretCal(r)));
-  root.append(h('div', { class: 'block' }, h('h2', {}, '2 · Asymmetry test: is the bias stronger on upside strikes?'), asymmetryBlock(r.asymmetry)));
-  root.append(h('div', { class: 'block' }, h('h2', {}, '3 · Strategy test: Buy “No” after fees'), strategyTable(r), eqChart, strategyNotes(r)));
-  root.append(h('div', { class: 'block' }, h('h2', {}, '4 · Timing: overpricing by hour of day (UTC)'), hrChart,
+  root.append(h('div', { class: 'block' }, h('h2', {}, '2, Asymmetry test: is the bias stronger on upside strikes?'), asymmetryBlock(r.asymmetry)));
+  root.append(h('div', { class: 'block' }, h('h2', {}, '3, Strategy test: Buy “No” after fees'), strategyTable(r), eqChart, strategyNotes(r)));
+  root.append(h('div', { class: 'block' }, h('h2', {}, '4, Timing: overpricing by hour of day (UTC)'), hrChart,
     h('p', { class: 'note' }, 'Each bar pools every price level for contracts expiring in that hour. Hours with few contracts are noisy; look for stable patterns, not single bars.')));
   root.append(h('div', { class: 'block' }, h('div', { class: 'toolrow' },
     h('button', { class: 'btn', type: 'button', onclick: () => download(`kalshi-${s.series}-contracts.csv`, toCSV(r.contracts)) }, 'Download contracts (CSV)'),
     h('button', { class: 'btn', type: 'button', onclick: () => download('kalshi-lab-results.json', JSON.stringify(r), 'application/json') }, 'Download results (JSON)'),
-    h('button', { class: 'btn', type: 'button', onclick: () => tab('console') }, 'Open in Python console →'))));
+    h('button', { class: 'btn', type: 'button', onclick: () => tab('console') }, 'Open in the Python console'))));
 
   calHost.append(calTable(r.calibration[S.split]));
   drawCalibration(calChart, r);
@@ -247,7 +262,7 @@ function interpretCal(r) {
   const sig = o.p_value != null && o.p_value < 0.05;
   return h('div', { class: 'callout' },
     `Across ${o.count.toLocaleString()} contracts priced ${o.lo}–${o.hi}¢, the average Yes price was ${o.avg_yes.toFixed(1)}¢ but Yes won ${o.actual_pct.toFixed(1)}% of the time (gap ${gapTxt(o.gap)}, p = ${fmt.p(o.p_value)}). `,
-    sig ? (o.gap > 0 ? 'That is statistically significant overpricing of Yes.' : 'Yes was significantly UNDERpriced here — the opposite of the hypothesis.') : 'That gap is not statistically distinguishable from zero with this sample.',
+    sig ? (o.gap > 0 ? 'That is statistically significant overpricing of Yes.' : 'Yes was significantly UNDERpriced here, the opposite of the hypothesis.') : 'That gap is not statistically distinguishable from zero with this sample.',
     h('span', { class: 'note' }, ' Several bins below may show large gaps by luck: with n of 20–40 per bin the noise is ±10 pp or more.'));
 }
 
@@ -282,7 +297,7 @@ function strategyNotes(r) {
   const items = [];
   if (best) {
     const sig = best.p_value != null && best.p_value < 0.05 && best.net_profit > 0;
-    items.push(`Best rule by net profit: “${best.name}”, ${usd(best.net_profit)} on ${best.trades} trades (ROI ${fmt.num(best.roi_pct, 2)}%). ${sig ? 'Its mean per-trade profit is significantly above zero (p < 0.05) — still one of several rules tried, so treat it with suspicion.' : 'Its per-trade profit is not distinguishable from zero.'}`);
+    items.push(`Best rule by net profit: “${best.name}”, ${usd(best.net_profit)} on ${best.trades} trades (ROI ${fmt.num(best.roi_pct, 2)}%). ${sig ? 'Its mean per-trade profit is significantly above zero (p < 0.05), still one of several rules tried, so treat it with suspicion.' : 'Its per-trade profit is not distinguishable from zero.'}`);
   }
   items.push('A “Buy No” trade wins when the market settles No; it only profits long-run if the win rate exceeds the break-even rate (entry price + fee). That is the “Break-even win rate” column.');
   return h('div', { class: 'callout' }, h('ul', { class: 'warnlist', style: 'margin:0' }, items.map((t) => h('li', {}, t))));
@@ -301,13 +316,13 @@ function drawCalibration(div, r) {
       line: { color: colors[split], width: 2 }, marker: { size: 8 },
       error_y: { type: 'data', symmetric: false, array: rows.map((x) => x.ci_hi - x.actual_pct), arrayminus: rows.map((x) => x.actual_pct - x.ci_lo), color: colors[split], thickness: 1, width: 3 },
       customdata: rows.map((x) => [x.bin, x.count, x.gap, x.p_value]),
-      hovertemplate: '%{customdata[0]}<br>avg Yes %{x:.1f}¢ → won %{y:.1f}%<br>n=%{customdata[1]} · gap %{customdata[2]:+.1f} pp<br>p=%{customdata[3]:.3f}<extra></extra>',
+      hovertemplate: '%{customdata[0]}<br>avg Yes %{x:.1f}¢ to won %{y:.1f}%<br>n=%{customdata[1]}, gap %{customdata[2]:+.1f} pp<br>p=%{customdata[3]:.3f}<extra></extra>',
       visible: split === 'all' || true,
     });
   }
   draw(div, traces, merge(base(), {
-    height: 520, title: title('Yes price vs actual win rate — below the line means Yes is overpriced'),
-    xaxis: { title: { text: 'Average Yes price (implied probability, ¢)' }, range: [0, 100], scaleanchor: 'y', scaleratio: 1 },
+    height: 520, title: title('Yes price vs actual win rate: below the line means Yes is overpriced'),
+    xaxis: { title: { text: 'Average Yes price (implied probability, ¢)' }, range: [0, 100] },
     yaxis: { title: { text: 'Actual Yes win rate (%)' }, range: [0, 100] }, legend: { orientation: 'h', y: -0.15 },
   }));
 }
@@ -321,7 +336,7 @@ function drawEquity(div, r) {
 function drawHourly(div, r) {
   const rows = r.hourly;
   draw(div, [{ type: 'bar', x: rows.map((x) => x.hour), y: rows.map((x) => x.gap), marker: { color: seriesColor(0), line: { color: cssVar('--surface'), width: 1 } },
-    customdata: rows.map((x) => [x.count, x.avg_yes, x.actual_pct]), hovertemplate: 'hour %{x}:00 UTC<br>gap %{y:+.1f} pp<br>n=%{customdata[0]} · avg Yes %{customdata[1]:.1f}¢ · won %{customdata[2]:.1f}%<extra></extra>' }],
+    customdata: rows.map((x) => [x.count, x.avg_yes, x.actual_pct]), hovertemplate: 'hour %{x}:00 UTC<br>gap %{y:+.1f} pp<br>n=%{customdata[0]}, avg Yes %{customdata[1]:.1f}¢, won %{customdata[2]:.1f}%<extra></extra>' }],
   merge(base(), { height: 320, title: title('Overpricing gap by UTC hour of expiry (pp, positive = Yes overpriced)'), xaxis: { title: { text: 'Hour (UTC)' }, dtick: 1 }, yaxis: { title: { text: 'Gap (pp)' } }, showlegend: false,
     shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0, line: { color: cssVar('--ink-3'), width: 1 } }] }));
 }

@@ -11,18 +11,22 @@ let bridge = null;
 let currentId = null;
 const status = (text) => postMessage({ type: 'status', text });
 
-async function init({ baseUrl, proxyBase }) {
+async function init({ baseUrl, proxyBase, files }) {
   status('Downloading the Python runtime…');
   pyodide = await loadPyodide({ indexURL: INDEX_URL });
   status('Loading numpy, pandas and scipy (first visit only, ~30 MB)…');
   await pyodide.loadPackage(['numpy', 'pandas', 'scipy']);
   status('Loading the analysis code…');
-  const manifest = await (await fetch(new URL('py/manifest.json', baseUrl))).json();
   pyodide.FS.mkdirTree('/home/pyodide/app/kalshi_lab');
-  for (const file of manifest.files) {
-    const res = await fetch(new URL(`py/${file}`, baseUrl));
-    if (!res.ok) throw new Error(`could not load py/${file} (${res.status})`);
-    pyodide.FS.writeFile(`/home/pyodide/app/${file}`, await res.text());
+  if (files) { // single-file build: the sources travel inside the page
+    for (const [file, text] of Object.entries(files)) pyodide.FS.writeFile(`/home/pyodide/app/${file}`, text);
+  } else {
+    const manifest = await (await fetch(new URL('py/manifest.json', baseUrl))).json();
+    for (const file of manifest.files) {
+      const res = await fetch(new URL(`py/${file}`, baseUrl));
+      if (!res.ok) throw new Error(`could not load py/${file} (${res.status})`);
+      pyodide.FS.writeFile(`/home/pyodide/app/${file}`, await res.text());
+    }
   }
   pyodide.runPython("import sys; sys.path.insert(0, '/home/pyodide/app')");
   bridge = pyodide.pyimport('bridge');

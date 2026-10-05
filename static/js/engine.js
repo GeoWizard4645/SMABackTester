@@ -36,7 +36,10 @@ export async function detect() {
 
 function startWorker() {
   if (ready) return ready;
-  worker = new Worker(new URL('./pyworker.js', import.meta.url), { type: 'module' });
+  const inline = document.getElementById('pyworker-src');
+  worker = inline
+    ? new Worker(URL.createObjectURL(new Blob([inline.textContent], { type: 'text/javascript' })), { type: 'module' })
+    : new Worker(new URL('./pyworker.js', import.meta.url), { type: 'module' });
   worker.onmessage = (e) => {
     const m = e.data;
     if (m.type === 'status') { emit(m.text); return; }
@@ -48,7 +51,8 @@ function startWorker() {
     else p.reject(Object.assign(new Error(m.message), { trace: m.trace }));
   };
   worker.onerror = (e) => emit(`Python worker error: ${e.message}`);
-  ready = send({ type: 'init', baseUrl: APP_BASE, proxyBase: new URL('api/proxy', APP_BASE).href });
+  const bundle = document.getElementById('py-files');
+  ready = send({ type: 'init', baseUrl: APP_BASE, proxyBase: new URL('api/proxy', APP_BASE).href, files: bundle ? JSON.parse(bundle.textContent) : null });
   ready.catch(() => { ready = null; worker = null; });
   return ready;
 }

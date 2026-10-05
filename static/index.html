@@ -3,208 +3,183 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMA Lab</title>
+<title>Finance project tests</title>
 <link rel="icon" href="data:,">
-<!-- The site lives under a sub-path (e.g. /FinanceProjectTests/). Every URL below is relative, so make sure the
-     page itself is addressed with a trailing slash, otherwise "static/..." would resolve against the parent folder. -->
+<!-- Every URL below is relative, so the page works at a domain root or under a sub-path. Make sure a sub-path
+     is addressed with a trailing slash, otherwise "static/..." would resolve against the parent folder. -->
 <script>if (!/\/$|\.[A-Za-z0-9]+$/.test(location.pathname)) location.replace(location.pathname + '/' + location.search + location.hash);</script>
 <link rel="stylesheet" href="static/style.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">
-    <span class="logo" aria-hidden="true">
-      <svg viewBox="0 0 32 32" width="26" height="26"><path d="M3 22 L10 14 L16 19 L29 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 26 H29" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".45"/></svg>
-    </span>
-    <div>
-      <h1>SMA Lab</h1>
-      <p class="tagline">Is the 200-day moving average really a support/resistance level?</p>
-    </div>
-  </div>
-  <nav class="viewnav" id="viewnav" aria-label="Lab">
-    <button type="button" data-view="sma" class="active">SMA Lab</button>
-    <button type="button" data-view="kalshi">Kalshi 15m Lab <span class="beta">Python</span></button>
+  <h1>Finance project tests</h1>
+  <nav class="viewnav" id="viewnav" aria-label="Choose a lab">
+    <button type="button" data-view="sma" class="active">Moving average</button>
+    <button type="button" data-view="kalshi">Kalshi 15-minute</button>
   </nav>
-  <div class="top-actions">
-    <span class="pystatus" id="py-status" hidden></span>
-    <button class="btn ghost" id="share-btn" title="Copy a link that restores every setting">Copy share link</button>
-    <button class="btn ghost" id="export-btn" title="Download the full results as JSON" disabled>Export JSON</button>
-    <button class="btn ghost" id="theme-btn" title="Toggle light / dark">Theme</button>
-  </div>
+  <span class="pystatus" id="py-status" hidden></span>
 </header>
 
 <div id="view-sma">
-<div class="layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="side-scroll">
+<div class="page">
+  <p class="lead tagline">Does price actually react to the 200-day moving average? This compares it with other lines that nobody watches. Choose an asset and the lines, then press Run.</p>
 
-      <details class="card" open>
-        <summary><span class="step">1</span> Assets &amp; dates</summary>
-        <div class="card-body">
-          <label class="lbl">Add any Yahoo Finance symbol</label>
-          <div class="row">
-            <input id="ticker-input" type="text" placeholder="TSLA, ^N225, DOGE-USD, GC=F" autocomplete="off" spellcheck="false">
-            <button class="btn" id="ticker-add" type="button">Add</button>
-          </div>
-          <div class="chips" id="ticker-chips" aria-live="polite"></div>
-          <details class="presets">
-            <summary>Browse presets (indices, stocks, crypto…)</summary>
-            <div id="preset-groups"></div>
-          </details>
-          <div class="row" style="margin-top:8px">
-            <label class="btn tiny" for="csv-upload" title="Use your own daily OHLC data (first column = date; needs Open, High, Low, Close)">Upload CSV…</label>
-            <input id="csv-upload" type="file" accept=".csv,text/csv" hidden>
-          </div>
-          <div class="grid2">
-            <div><label class="lbl" for="start">Start</label><input id="start" type="date"></div>
-            <div><label class="lbl" for="end">End <span class="hint">(blank = today)</span></label><input id="end" type="date"></div>
-          </div>
-          <div class="quick">
-            <button class="btn tiny" data-range="max" type="button">Max</button>
-            <button class="btn tiny" data-range="1990" type="button">Since 1990</button>
-            <button class="btn tiny" data-range="2008" type="button">Since 2008</button>
-            <button class="btn tiny" data-range="10y" type="button">Last 10y</button>
-          </div>
+  <section class="card inputs" id="inputs">
+    <div class="form-grid">
+      <div class="f span2">
+        <label class="lbl">Asset <span class="hint">any Yahoo Finance symbol, e.g. ^GSPC, AAPL, BTC-USD</span></label>
+        <div class="row">
+          <input id="ticker-input" type="text" placeholder="Type a symbol and press Add" autocomplete="off" spellcheck="false">
+          <button class="btn" id="ticker-add" type="button">Add</button>
         </div>
-      </details>
+        <div class="chips" id="ticker-chips" aria-live="polite"></div>
+        <details class="presets">
+          <summary>Pick from a list</summary>
+          <div id="preset-groups"></div>
+        </details>
+        <label class="btn tiny linkish" for="csv-upload" title="Daily data with Date, Open, High, Low, Close columns">or upload your own CSV</label>
+        <input id="csv-upload" type="file" accept=".csv,text/csv" hidden>
+      </div>
+      <div class="f">
+        <label class="lbl" for="start">From</label>
+        <input id="start" type="date">
+        <div class="quick">
+          <button class="btn tiny" data-range="max" type="button">Earliest</button>
+          <button class="btn tiny" data-range="2008" type="button">2008</button>
+          <button class="btn tiny" data-range="10y" type="button">Last 10 years</button>
+        </div>
+      </div>
+      <div class="f">
+        <label class="lbl" for="end">To <span class="hint">blank = today</span></label>
+        <input id="end" type="date">
+      </div>
 
-      <details class="card" open>
-        <summary><span class="step">2</span> Lines to test</summary>
-        <div class="card-body">
-          <div class="grid2">
-            <div><label class="lbl" for="target">Target line (bars)</label><input id="target" type="number" min="2" max="1000" step="1"></div>
-            <div><label class="lbl" for="ma-type">Type</label>
-              <select id="ma-type">
-                <option value="sma">Simple (SMA)</option>
-                <option value="ema">Exponential (EMA)</option>
-                <option value="wma">Linear-weighted (WMA)</option>
-              </select></div>
-          </div>
-          <label class="lbl">Control lines <span class="hint">(arbitrary lines nobody watches)</span></label>
-          <div class="row">
-            <input id="control-input" type="number" min="2" max="1000" placeholder="e.g. 174">
-            <button class="btn" id="control-add" type="button">Add</button>
-          </div>
-          <div class="chips" id="control-chips"></div>
-          <div class="quick">
-            <button class="btn tiny" data-control="174" type="button">+174</button>
-            <button class="btn tiny" data-control="150" type="button">+150</button>
-            <button class="btn tiny" data-control="250" type="button">+250</button>
-            <button class="btn tiny" data-control="100" type="button">+100</button>
-            <button class="btn tiny" data-control="50" type="button">+50</button>
-            <button class="btn tiny" id="control-random" type="button" title="Add a random window 50–400, away from the target">+ random</button>
-            <button class="btn tiny" id="control-clear" type="button">Clear</button>
-          </div>
-          <p class="help">Every line gets identical event rules. The question is whether the <b>target</b> behaves differently from lines that nobody watches.</p>
+      <div class="f">
+        <label class="lbl" for="target">Line to test <span class="hint">days</span></label>
+        <input id="target" type="number" min="2" max="1000" step="1">
+      </div>
+      <div class="f">
+        <label class="lbl" for="ma-type">Line type</label>
+        <select id="ma-type">
+          <option value="sma">Simple average</option>
+          <option value="ema">Exponential average</option>
+          <option value="wma">Weighted average</option>
+        </select>
+      </div>
+      <div class="f span2">
+        <label class="lbl">Comparison lines <span class="hint">any lengths, e.g. 174</span></label>
+        <div class="row">
+          <input id="control-input" type="number" min="2" max="1000" placeholder="e.g. 174">
+          <button class="btn" id="control-add" type="button">Add</button>
         </div>
-      </details>
-
-      <details class="card" open>
-        <summary><span class="step">3</span> Eras (timeframes)</summary>
-        <div class="card-body">
-          <div class="seg" role="radiogroup" aria-label="Era mode">
-            <label><input type="radio" name="era-mode" value="smart" checked><span>Smart</span></label>
-            <label><input type="radio" name="era-mode" value="custom"><span>Custom</span></label>
-            <label><input type="radio" name="era-mode" value="equal"><span>Equal slices</span></label>
-          </div>
-          <p class="help" id="era-mode-help"></p>
-          <div id="era-custom" hidden>
-            <label class="lbl">Last year of each era <span class="hint">(the final era runs to the end)</span></label>
-            <div id="era-ends" class="era-ends"></div>
-            <div class="quick">
-              <button class="btn tiny" id="era-add" type="button">+ boundary</button>
-              <button class="btn tiny era-preset" data-ends="1990,2007" type="button">S&amp;P regimes</button>
-              <button class="btn tiny era-preset" data-ends="2007" type="button">Pre / post 2008</button>
-              <button class="btn tiny era-preset" data-ends="2019" type="button">Pre / post 2020</button>
-              <button class="btn tiny era-preset" data-ends="1959,1969,1979,1989,1999,2009,2019" type="button">By decade</button>
-            </div>
-          </div>
-          <div id="era-equal" hidden>
-            <label class="lbl" for="era-n">Number of equal-length eras</label>
-            <input id="era-n" type="number" min="2" max="8" value="3">
-          </div>
-          <div class="timeline" id="era-timeline" aria-hidden="true"></div>
-          <div class="grid2">
-            <div><label class="lbl" for="base-era">Compare early era</label><select id="base-era"></select></div>
-            <div><label class="lbl" for="late-era">…with late era</label><select id="late-era"></select></div>
-          </div>
+        <div class="chips" id="control-chips"></div>
+        <div class="quick">
+          <button class="btn tiny" data-control="174" type="button">174</button>
+          <button class="btn tiny" data-control="150" type="button">150</button>
+          <button class="btn tiny" data-control="250" type="button">250</button>
+          <button class="btn tiny" data-control="100" type="button">100</button>
+          <button class="btn tiny" data-control="50" type="button">50</button>
+          <button class="btn tiny" id="control-random" type="button">random</button>
+          <button class="btn tiny" id="control-clear" type="button">clear</button>
         </div>
-      </details>
-
-      <details class="card">
-        <summary><span class="step">4</span> Event definition</summary>
-        <div class="card-body">
-          <div class="grid2">
-            <div><label class="lbl" for="band" title="Touch band half-width, in ATRs">Band (× ATR)</label><input id="band" type="number" min="0.05" max="5" step="0.05"></div>
-            <div><label class="lbl" for="breach" title="A bounce fails if price closes this many ATRs through the line">Breach (× ATR)</label><input id="breach" type="number" min="0.1" max="10" step="0.1"></div>
-            <div><label class="lbl" for="approach" title="Prior closes that must all be on one side of the line">Approach (bars)</label><input id="approach" type="number" min="1" max="30" step="1"></div>
-            <div><label class="lbl" for="refractory" title="Skip new events this soon after an accepted one">De-cluster (bars)</label><input id="refractory" type="number" min="0" max="90" step="1"></div>
-            <div><label class="lbl" for="atr-window">ATR window</label><input id="atr-window" type="number" min="2" max="100" step="1"></div>
-            <div><label class="lbl" for="breach-basis" title="Price used for the breach test">Breach test on</label>
-              <select id="breach-basis"><option value="close">Close</option><option value="low">Intraday low/high</option></select></div>
-            <div><label class="lbl" for="pre">Plot window: before</label><input id="pre" type="number" min="1" max="30" step="1"></div>
-            <div><label class="lbl" for="post">Plot window: after</label><input id="post" type="number" min="1" max="60" step="1"></div>
-          </div>
-          <label class="lbl">Forward horizons (bars)</label>
-          <div class="chips toggle" id="horizon-chips"></div>
-          <div class="row"><input id="horizon-custom" type="number" min="1" max="60" placeholder="custom"><button class="btn" id="horizon-add" type="button">Add</button></div>
-          <label class="lbl" for="direction">Which tests to include</label>
-          <select id="direction">
-            <option value="both">Support and resistance (pooled)</option>
-            <option value="support">Support tests only (approach from above)</option>
-            <option value="resistance">Resistance tests only (approach from below)</option>
-          </select>
-        </div>
-      </details>
-
-      <details class="card">
-        <summary><span class="step">5</span> Statistics</summary>
-        <div class="card-body">
-          <div class="grid2">
-            <div><label class="lbl" for="bootstrap">Bootstrap reps</label>
-              <select id="bootstrap"><option>500</option><option>1000</option><option selected>2000</option><option>5000</option><option>10000</option><option>20000</option></select></div>
-            <div><label class="lbl" for="seed">Random seed</label><input id="seed" type="number" min="0" step="1"></div>
-          </div>
-          <p class="help">More replications give smoother p-values but take longer. The seed makes every run reproducible.</p>
-        </div>
-      </details>
+      </div>
     </div>
 
-    <div class="side-foot">
-      <button class="btn primary big" id="run-btn" type="button">Run analysis</button>
+    <details class="adv">
+      <summary>More settings</summary>
+      <div class="adv-body">
+        <h3>Time periods (eras)</h3>
+        <div class="seg" role="radiogroup" aria-label="Era mode">
+          <label><input type="radio" name="era-mode" value="smart" checked><span>Automatic</span></label>
+          <label><input type="radio" name="era-mode" value="custom"><span>Choose years</span></label>
+          <label><input type="radio" name="era-mode" value="equal"><span>Equal slices</span></label>
+        </div>
+        <p class="help" id="era-mode-help"></p>
+        <div id="era-custom" hidden>
+          <label class="lbl">Last year of each period <span class="hint">the final period runs to the end</span></label>
+          <div id="era-ends" class="era-ends"></div>
+          <div class="quick">
+            <button class="btn tiny" id="era-add" type="button">add a year</button>
+            <button class="btn tiny era-preset" data-ends="1990,2007" type="button">1990 / 2007</button>
+            <button class="btn tiny era-preset" data-ends="2007" type="button">before / after 2008</button>
+            <button class="btn tiny era-preset" data-ends="2019" type="button">before / after 2020</button>
+            <button class="btn tiny era-preset" data-ends="1959,1969,1979,1989,1999,2009,2019" type="button">by decade</button>
+          </div>
+        </div>
+        <div id="era-equal" hidden>
+          <label class="lbl" for="era-n">Number of equal periods</label>
+          <input id="era-n" type="number" min="2" max="8" value="3">
+        </div>
+        <div class="timeline" id="era-timeline" aria-hidden="true"></div>
+        <div class="form-grid">
+          <div class="f"><label class="lbl" for="base-era">Compare this earlier period…</label><select id="base-era"></select></div>
+          <div class="f"><label class="lbl" for="late-era">…with this later one</label><select id="late-era"></select></div>
+        </div>
+
+        <h3>What counts as a touch</h3>
+        <div class="form-grid four">
+          <div class="f"><label class="lbl" for="band" title="How close to the line price must get, measured in average daily ranges (ATR)">Closeness (× ATR)</label><input id="band" type="number" min="0.05" max="5" step="0.05"></div>
+          <div class="f"><label class="lbl" for="breach" title="A bounce fails if price closes this far through the line">Fail distance (× ATR)</label><input id="breach" type="number" min="0.1" max="10" step="0.1"></div>
+          <div class="f"><label class="lbl" for="approach" title="Days price must stay on one side before the touch">Days on one side</label><input id="approach" type="number" min="1" max="30" step="1"></div>
+          <div class="f"><label class="lbl" for="refractory" title="Ignore touches this soon after the previous one">Days between touches</label><input id="refractory" type="number" min="0" max="90" step="1"></div>
+          <div class="f"><label class="lbl" for="atr-window">ATR days</label><input id="atr-window" type="number" min="2" max="100" step="1"></div>
+          <div class="f"><label class="lbl" for="breach-basis">Fail test uses</label><select id="breach-basis"><option value="close">Closing price</option><option value="low">Intraday low / high</option></select></div>
+          <div class="f"><label class="lbl" for="pre">Chart: days before</label><input id="pre" type="number" min="1" max="30" step="1"></div>
+          <div class="f"><label class="lbl" for="post">Chart: days after</label><input id="post" type="number" min="1" max="60" step="1"></div>
+        </div>
+        <label class="lbl">Look this many days ahead</label>
+        <div class="chips toggle" id="horizon-chips"></div>
+        <div class="row narrow"><input id="horizon-custom" type="number" min="1" max="60" placeholder="other"><button class="btn" id="horizon-add" type="button">Add</button></div>
+        <label class="lbl" for="direction">Which touches</label>
+        <select id="direction">
+          <option value="both">Both kinds</option>
+          <option value="support">Only price falling to the line (support)</option>
+          <option value="resistance">Only price rising to the line (resistance)</option>
+        </select>
+
+        <h3>Statistics</h3>
+        <div class="form-grid">
+          <div class="f"><label class="lbl" for="bootstrap">Bootstrap repeats</label>
+            <select id="bootstrap"><option>500</option><option>1000</option><option selected>2000</option><option>5000</option><option>10000</option><option>20000</option></select></div>
+          <div class="f"><label class="lbl" for="seed">Random seed</label><input id="seed" type="number" min="0" step="1"></div>
+        </div>
+      </div>
+    </details>
+
+    <div class="runrow">
+      <button class="btn primary big" id="run-btn" type="button">Run</button>
       <button class="btn ghost" id="reset-btn" type="button">Reset</button>
-      <div class="status" id="status" role="status" aria-live="polite"></div>
+      <span class="status" id="status" role="status" aria-live="polite"></span>
+      <span class="spacer"></span>
+      <button class="btn ghost small" id="share-btn" type="button" title="Copy a link that restores these settings">Copy link</button>
+      <button class="btn ghost small" id="export-btn" type="button" disabled title="Download the full results">Download results</button>
     </div>
-  </aside>
+  </section>
 
-  <main class="main">
+  <section class="output" id="output">
     <nav class="tabs" id="tabs" role="tablist">
-      <button role="tab" data-tab="overview" class="active">Overview</button>
-      <button role="tab" data-tab="price">Price &amp; events</button>
-      <button role="tab" data-tab="study">Event study</button>
-      <button role="tab" data-tab="eras">Eras</button>
+      <button role="tab" data-tab="overview" class="active">Summary</button>
+      <button role="tab" data-tab="charts">Charts</button>
       <button role="tab" data-tab="tables">Tables</button>
-      <button role="tab" data-tab="scan">Line scan</button>
-      <button role="tab" data-tab="explorer">Event explorer</button>
-      <button role="tab" data-tab="method">Method &amp; math</button>
+      <button role="tab" data-tab="scan">Try every line</button>
+      <button role="tab" data-tab="explorer">Each touch</button>
+      <button role="tab" data-tab="method">How it works</button>
     </nav>
 
     <div class="subbar" id="subbar" hidden>
       <div class="subgroup"><span class="sublabel">Asset</span><div class="seg small" id="asset-select"></div></div>
-      <div class="subgroup"><span class="sublabel">Target vs</span><select id="control-select"></select></div>
-      <div class="subgroup"><span class="sublabel">Horizon</span><select id="horizon-select"></select></div>
+      <div class="subgroup"><span class="sublabel">Compare with</span><select id="control-select"></select></div>
+      <div class="subgroup"><span class="sublabel">Look ahead</span><select id="horizon-select"></select></div>
     </div>
 
     <section class="panel active" id="tab-overview"></section>
-    <section class="panel" id="tab-price"></section>
-    <section class="panel" id="tab-study"></section>
-    <section class="panel" id="tab-eras"></section>
+    <section class="panel" id="tab-charts"></section>
     <section class="panel" id="tab-tables"></section>
     <section class="panel" id="tab-scan"></section>
     <section class="panel" id="tab-explorer"></section>
     <section class="panel" id="tab-method"></section>
-  </main>
+  </section>
 </div>
 </div>
 <div id="view-kalshi" hidden></div>

@@ -1,7 +1,7 @@
 // Local test of the worker logic against the real upstream APIs:  node cloudflare/test_worker.mjs
 import worker from "./worker.js";
 
-const B = "https://vivaanshahani.com/FinanceProjectTests/api/proxy";
+const B = "https://financetests.vivaanshahani.com/api/proxy";
 const get = (p) => worker.fetch(new Request(B + p), {}, { waitUntil() {} });
 let failures = 0;
 const check = (name, ok, detail = "") => { console.log((ok ? "PASS " : "FAIL ") + name + (detail ? "  " + detail : "")); if (!ok) failures++; };
@@ -36,7 +36,10 @@ check("coinbase blocks non-allowlisted path", r.status === 403);
 r = await worker.fetch(new Request(B + "/yahoo?symbol=AAPL", { method: "POST" }), {}, {});
 check("POST rejected", r.status === 405);
 
-r = await worker.fetch(new Request("https://vivaanshahani.com/other"), {}, {});
-check("outside base is 404", r.status === 404);
+r = await worker.fetch(new Request("https://financetests.vivaanshahani.com/other"), {}, {});
+check("outside /api/proxy/ is 404", r.status === 404);
+
+r = await worker.fetch(new Request("https://vivaanshahani.com/FinanceProjectTests/api/proxy/yahoo?symbol=AAPL&period1=1700000000&period2=1790000000"), {}, {});
+check("works under a sub-path too", r.status === 200);
 
 process.exit(failures ? 1 : 0);

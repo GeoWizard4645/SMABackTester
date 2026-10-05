@@ -9,9 +9,9 @@ const TICKER_RE = /^[A-Za-z0-9^.=\-]{1,20}$/;
 let changeHandler = () => {};
 
 const ERA_MODE_HELP = {
-  smart: 'Uses the US-market regimes 1950–1990 / 1991–2007 / 2008+ when an asset has history back to 1980; otherwise splits that asset’s history into equal thirds (e.g. Bitcoin).',
-  custom: 'You choose the last calendar year of every era. Add as many boundaries as you like (up to 7), e.g. one per decade. Assets that do not cover an era just show n/a for it.',
-  equal: 'Cuts each asset’s own history into N eras of equal calendar length.',
+  smart: 'Splits the history into 1950–1990, 1991–2007 and 2008 onward (or into equal thirds for assets that are newer than 1980, like Bitcoin).',
+  custom: 'You pick the last year of each period, for example one per decade. A period an asset has no data for shows n/a.',
+  equal: 'Cuts each asset’s history into equal-length periods.',
 };
 
 export function initControls(meta, onChange) {
@@ -57,7 +57,7 @@ function buildPresets() {
       h('div', { class: 'pbtns' }, g.items.map((it) => h('button', {
         class: 'pbtn', type: 'button', title: it.n, dataset: { t: it.t },
         onclick: () => (S.tickers.includes(it.t) ? removeTicker(it.t) : addTicker(it.t)),
-      }, it.t === 'SYNTHETIC' ? 'Synthetic null' : `${it.t} · ${it.n.split(' ').slice(0, 2).join(' ')}`)))));
+      }, it.t === 'SYNTHETIC' ? 'Synthetic null' : `${it.t}, ${it.n.split(' ').slice(0, 2).join(' ')}`)))));
   }
 }
 

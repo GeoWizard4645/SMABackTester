@@ -67,11 +67,29 @@ def configure(kalshi: str | None = None, coinbase: str | None = None, progress=N
 
 
 # ------------------------------------------------------------------ HTTP
-def _get_json(url: str, params: dict | None = None, retries: int = 5):
+_last_call = {"t": 0.0}
+
+
+def _pace(url: str) -> None:
+    """Space requests out: Kalshi answers 429 to bursts of calls (about a dozen in a second)."""
+    gap = 0.35 if "kalshi" in url else 0.12
+    wait = gap - (time.monotonic() - _last_call["t"])
+    if wait > 0:
+        time.sleep(wait)
+    _last_call["t"] = time.monotonic()
+
+
+def _rate_limited(err, status: int) -> bool:
+    text = json.dumps(err).lower() if err is not None else ""
+    return status == 429 or "too_many" in text or "too many" in text or "rate" in text and "limit" in text
+
+
+def _get_json(url: str, params: dict | None = None, retries: int = 7):
     if params:
         url += ("&" if "?" in url else "?") + urlencode(params)
     last = "unknown error"
     for attempt in range(retries):
+        _pace(url)
         try:
             if IS_BROWSER:
                 from pyodide.http import open_url  # type: ignore
@@ -97,12 +115,13 @@ def _get_json(url: str, params: dict | None = None, retries: int = 5):
             err = data["error"]
             code = err.get("code") if isinstance(err, dict) else str(err)
             last = f"API error {code}"
-            if "too_many" in str(code).lower() or status == 429:
-                time.sleep(1.5 * (attempt + 1))
+            if _rate_limited(err, status):
+                _progress(f"Kalshi is rate-limiting requests; waiting {min(20, 2 ** attempt)}s…")
+                time.sleep(min(20, 2 ** attempt))
                 continue
             raise DataError(f"{url.split('?')[0]} -> {err}")
         if status == 429:
-            time.sleep(1.5 * (attempt + 1))
+            time.sleep(min(20, 2 ** attempt))
             continue
         return data
     raise DataError(f"giving up on {url.split('?')[0]}: {last}")
@@ -232,8 +251,6 @@ def fetch_spot(product: str, start_ts: int, end_ts: int) -> dict[int, float]:
             out[int(r[0]) + 60] = float(r[4])
         if k % 5 == 0:
             _progress(f"spot prices {k + 1}/{n_chunks}")
-        if not IS_BROWSER:
-            time.sleep(0.12)
     return out
 
 

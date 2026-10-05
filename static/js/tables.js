@@ -51,40 +51,42 @@ export function verdict(res, control, horizon) {
   const pos = (r) => r && r.boot_p != null && r.boot_p < 0.05 && r.diff > 0;
   const neg = (r) => r && r.boot_p != null && r.boot_p < 0.05 && r.diff < 0;
   const none = (r) => !r || r.boot_p == null;
-  let kind = 'null', headline = 'No statistically distinguishable difference';
-  if (none(b) && none(c)) { kind = 'na'; headline = 'Not enough data for inference'; }
-  else if ((pos(b) || pos(c)) && !(neg(b) || neg(c))) { kind = 'pos'; headline = 'Target reacts more than the control (nominal p < 0.05)'; }
-  else if ((neg(b) || neg(c)) && !(pos(b) || pos(c))) { kind = 'neg'; headline = 'Target reacts LESS than the control — opposite of the hypothesis'; }
-  else if ((pos(b) || pos(c)) && (neg(b) || neg(c))) { kind = 'mixed'; headline = 'Mixed signals: one metric favours the target, the other the control'; }
+  let kind = 'null', headline = 'No real difference between the two lines';
+  if (none(b) && none(c)) { kind = 'na'; headline = 'Not enough data to tell'; }
+  else if ((pos(b) || pos(c)) && !(neg(b) || neg(c))) { kind = 'pos'; headline = 'The line you are testing reacts more than the comparison line'; }
+  else if ((neg(b) || neg(c)) && !(pos(b) || pos(c))) { kind = 'neg'; headline = 'The line you are testing reacts LESS than the comparison line (the opposite of the theory)'; }
+  else if ((pos(b) || pos(c)) && (neg(b) || neg(c))) { kind = 'mixed'; headline = 'Mixed: one measure favours the tested line, the other the comparison line'; }
   const grew = (r) => r && r.boot_p != null && r.boot_p < 0.05 && r.did > 0;
   const shrank = (r) => r && r.boot_p != null && r.boot_p < 0.05 && r.did < 0;
-  let era = 'No clear change in the target-vs-control gap between the early and late era.';
-  if (grew(e) || grew(eb)) era = `The gap grew from ${res.base_era} to ${res.late_era} (nominal p < 0.05).`;
-  else if (shrank(e) || shrank(eb)) era = `The gap shrank from ${res.base_era} to ${res.late_era} (nominal p < 0.05).`;
-  else if (!e || e.boot_p == null) era = `Era comparison unavailable (too few events or fewer than 5 years in ${res.base_era} / ${res.late_era}).`;
+  let era = 'The difference between the two lines did not change clearly from the early period to the late one.';
+  if (grew(e) || grew(eb)) era = `The difference between the lines grew from ${res.base_era} to ${res.late_era}.`;
+  else if (shrank(e) || shrank(eb)) era = `The difference between the lines shrank from ${res.base_era} to ${res.late_era}.`;
+  else if (!e || e.boot_p == null) era = `Early-vs-late comparison unavailable (too few touches, or fewer than 5 years in ${res.base_era} / ${res.late_era}).`;
   return { kind, headline, era, b, c, e, eb };
 }
 
-export function gapPills(v, horizon) {
+/** Plain-English evidence lines for one target-vs-control verdict. */
+export function plainLines(v, horizon, res, control) {
   if (!v) return null;
-  const pill = (label, val, p) => h('span', { class: 'pill ' + sigClass(p), title: p == null ? 'no bootstrap inference' : `bootstrap p = ${fmt.p(p)}` }, `${label} ${val}${p == null ? '' : ' (p ' + fmt.p(p) + stars(p) + ')'}`);
-  return [
-    pill(`bounce gap ${horizon}b`, fmt.pp(v.b && v.b.diff), v.b && v.b.boot_p),
-    pill(`CAR gap ${horizon}b`, fmt.spct(v.c && v.c.diff), v.c && v.c.boot_p),
-    v.e ? pill('era-change CAR', fmt.spct(v.e.did), v.e.boot_p) : null,
-  ];
+  const t = `${res.mas[0]}-day`, c = `${control}-day`;
+  const pTxt = (p) => (p == null ? 'not enough data for a test' : `p = ${fmt.p(p)}${p < 0.05 ? ', unlikely to be luck' : ''}`);
+  const line = (text, p) => h('div', { class: 'evline' }, text, ' ', h('span', { class: 'ptag ' + sigClass(p) }, pTxt(p)));
+  const out = [];
+  if (v.b) out.push(line(`After touching the line, price bounced away ${fmt.pct(v.b.mean_target, 0)} of the time for the ${t} line vs ${fmt.pct(v.b.mean_control, 0)} for the ${c} line (difference ${fmt.pp(v.b.diff)}).`, v.b.boot_p));
+  if (v.c) out.push(line(`Average move over the next ${horizon} days, in the direction a floor or ceiling would predict: ${fmt.spct(v.c.mean_target)} vs ${fmt.spct(v.c.mean_control)} (difference ${fmt.spct(v.c.diff)}).`, v.c.boot_p));
+  return out;
 }
 
 /** Scoreboard: assets × controls. */
 export function scoreboard(results, horizon) {
   const controls = [...new Set(results.flatMap((r) => r.mas.slice(1)))];
-  const head = h('tr', {}, h('th', { class: 'l' }, 'Asset'), controls.map((c) => h('th', {}, `vs ${c}`)));
+  const head = h('tr', {}, h('th', { class: 'l' }, 'Asset'), controls.map((c) => h('th', {}, `vs ${c}-day line`)));
   const rows = results.map((res) => h('tr', {}, h('td', { class: 'l' }, res.label), controls.map((c) => {
     const v = verdict(res, String(c), horizon);
     if (!v) return h('td', {}, '–');
     const worst = Math.min(v.b && v.b.boot_p != null ? v.b.boot_p : 1, v.c && v.c.boot_p != null ? v.c.boot_p : 1);
     return h('td', { class: sigClass(worst) }, h('span', { class: 'cell2' },
-      `CAR ${fmt.spct(v.c && v.c.diff)}`, h('small', {}, `bounce ${fmt.pp(v.b && v.b.diff)}`)));
+      `move ${fmt.spct(v.c && v.c.diff)}`, h('small', {}, `bounce ${fmt.pp(v.b && v.b.diff)}`)));
   })));
   return h('div', { class: 'tablewrap' }, h('table', { class: 'dt score' }, h('thead', {}, head), h('tbody', {}, rows)));
 }

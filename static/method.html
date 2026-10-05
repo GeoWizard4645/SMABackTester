@@ -1,6 +1,6 @@
 <div class="method">
-<h2 id="m-big">1 · The big picture</h2>
-<p>Traders watch the 200-day moving average. If enough of them buy when price falls to it and sell when price rises to it, it could become a genuine support/resistance level <i>purely because everyone believes in it</i> — a self-fulfilling prophecy. This lab turns that idea into three testable claims:</p>
+<h2 id="m-big">1. The big picture</h2>
+<p>Traders watch the 200-day moving average. If enough of them buy when price falls to it and sell when price rises to it, it could become a genuine support/resistance level <i>purely because everyone believes in it</i>, a self-fulfilling prophecy. This lab turns that idea into three testable claims:</p>
 <table class="dt"><thead><tr><th>#</th><th>Claim</th><th>How it is tested</th></tr></thead><tbody>
 <tr><td>H1</td><td>Price reacts to the target line more than to a line nobody watches.</td><td>Identical event rules for the target and one or more <b>control lines</b> (arbitrary window lengths).</td></tr>
 <tr><td>H2</td><td>“Reacts” means price turns away from the line instead of slicing through it.</td><td>Bounce rate and abnormal forward return, direction-adjusted.</td></tr>
@@ -11,23 +11,23 @@
 <a href="#m-flow">Pipeline</a><a href="#m-ind">Indicators</a><a href="#m-event">Events</a><a href="#m-metrics">Metrics</a><a href="#m-ci">Intervals</a><a href="#m-tests">Tests</a><a href="#m-boot">Bootstrap</a><a href="#m-did">Eras &amp; DiD</a><a href="#m-scan">Line scan</a><a href="#m-read">Reading the charts</a><a href="#m-limits">Limits</a><a href="#m-gloss">Glossary</a>
 </div>
 
-<h2 id="m-flow">2 · The pipeline</h2>
+<h2 id="m-flow">2. The pipeline</h2>
 <svg class="diagram" viewBox="0 0 780 150" role="img" aria-label="Pipeline: data, indicators, events, metrics, statistics, charts">
 <defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="currentColor" style="color:var(--ink-3)"/></marker></defs>
 <g>
 <rect class="box" x="6" y="40" width="108" height="62" rx="9"/><text x="60" y="66" text-anchor="middle">Prices</text><text class="small" x="60" y="84" text-anchor="middle">daily OHLC</text>
-<rect class="box" x="140" y="40" width="108" height="62" rx="9"/><text x="194" y="66" text-anchor="middle">Indicators</text><text class="small" x="194" y="84" text-anchor="middle">MA · ATR</text>
+<rect class="box" x="140" y="40" width="108" height="62" rx="9"/><text x="194" y="66" text-anchor="middle">Indicators</text><text class="small" x="194" y="84" text-anchor="middle">MA, ATR</text>
 <rect class="box hl" x="274" y="40" width="108" height="62" rx="9"/><text x="328" y="66" text-anchor="middle">Touch events</text><text class="small" x="328" y="84" text-anchor="middle">de-clustered</text>
-<rect class="box" x="408" y="40" width="108" height="62" rx="9"/><text x="462" y="66" text-anchor="middle">Reactivity</text><text class="small" x="462" y="84" text-anchor="middle">bounce · CAR</text>
-<rect class="box" x="542" y="40" width="108" height="62" rx="9"/><text x="596" y="66" text-anchor="middle">Statistics</text><text class="small" x="596" y="84" text-anchor="middle">tests · bootstrap</text>
+<rect class="box" x="408" y="40" width="108" height="62" rx="9"/><text x="462" y="66" text-anchor="middle">Reactivity</text><text class="small" x="462" y="84" text-anchor="middle">bounce, CAR</text>
+<rect class="box" x="542" y="40" width="108" height="62" rx="9"/><text x="596" y="66" text-anchor="middle">Statistics</text><text class="small" x="596" y="84" text-anchor="middle">tests, bootstrap</text>
 <rect class="box" x="676" y="40" width="98" height="62" rx="9"/><text x="725" y="66" text-anchor="middle">Charts</text><text class="small" x="725" y="84" text-anchor="middle">&amp; tables</text>
 </g>
 <path class="arrow" d="M114 71 H138"/><path class="arrow" d="M248 71 H272"/><path class="arrow" d="M382 71 H406"/><path class="arrow" d="M516 71 H540"/><path class="arrow" d="M650 71 H674"/>
-<text class="small" x="390" y="130" text-anchor="middle">Run once per line (target and each control) — identical rules, identical benchmark.</text>
+<text class="small" x="390" y="130" text-anchor="middle">Run once per line (target and each control), identical rules, identical benchmark.</text>
 </svg>
-<p>Everything on this page is computed by the project's real Python modules (<code>metrics.py</code>, <code>events.py</code>, <code>stats.py</code>) — in your browser via Pyodide on the public website, or natively when you run the local server.</p>
+<p>Everything on this page is computed by the project's real Python modules (<code>metrics.py</code>, <code>events.py</code>, <code>stats.py</code>), in your browser via Pyodide on the public website, or natively when you run the local server.</p>
 
-<h2 id="m-ind">3 · Indicators</h2>
+<h2 id="m-ind">3. Indicators</h2>
 <p>Notation: for bar $t$, $O_t,H_t,L_t,C_t$ are open, high, low, close; $N$ is the line's window.</p>
 <h3>Moving average (three kinds)</h3>
 <div class="eq">$$\text{SMA}_t=\frac1N\sum_{i=0}^{N-1}C_{t-i}\qquad \text{EMA}_t=\alpha C_t+(1-\alpha)\text{EMA}_{t-1},\ \alpha=\tfrac{2}{N+1}\qquad \text{WMA}_t=\frac{\sum_{i=0}^{N-1}(N-i)\,C_{t-i}}{N(N+1)/2}$$</div>
@@ -39,7 +39,7 @@
 <div class="eq">$$d_t=\frac{C_t-\text{MA}_t}{\text{MA}_t},\quad d^{\text{ATR}}_t=\frac{C_t-\text{MA}_t}{\text{ATR}_t},\quad \rho^{\text{TR}}_t=\frac{\text{TR}_t}{\frac1{20}\sum_{i=1}^{20}\text{TR}_{t-i}}$$</div>
 <p>$\rho^{\text{TR}}$ compares the event day's range with the <i>previous</i> 20 days (the event is excluded from its own baseline). A value of 1 is a normal day; the lab also reports the ATR version, which moves slowly and stays near 1.</p>
 
-<h2 id="m-event">4 · What counts as a “touch”</h2>
+<h2 id="m-event">4. What counts as a “touch”</h2>
 <p>The tolerance band around the line is $[\text{MA}_t-b\,\text{ATR}_t,\ \text{MA}_t+b\,\text{ATR}_t]$ with $b=0.5$ by default (set “Band” in the sidebar). A touch is an <b>approach from a definite side</b>: price must have spent the previous $m=5$ closes on one side of the line first.</p>
 <div class="eq">$$\text{Support test: }\ C_{t-i}\gt \text{MA}_{t-i}\ (i=1..m)\ \wedge\ L_t\le \text{MA}_t+b\,\text{ATR}_t$$
 $$\text{Resistance test: }\ C_{t-i}\lt \text{MA}_{t-i}\ (i=1..m)\ \wedge\ H_t\ge \text{MA}_t-b\,\text{ATR}_t$$</div>
@@ -52,7 +52,7 @@ $$\text{Resistance test: }\ C_{t-i}\lt \text{MA}_{t-i}\ (i=1..m)\ \wedge\ H_t\ge
 <h3>De-clustering</h3>
 <p>Price often hugs a line for days, producing near-identical events. Candidates are processed in time order and accepted only if $i-i_{\text{last accepted}}>R$ ($R=10$ bars by default; set “De-cluster”). This also keeps the forward windows of different events from overlapping, so observations are closer to independent.</p>
 
-<h2 id="m-metrics">5 · Measuring the reaction</h2>
+<h2 id="m-metrics">5. Measuring the reaction</h2>
 <p>All outcomes start from the <b>close of the event day</b>, $C_t$, so nothing about that day's own result leaks into the entry.</p>
 <h3>Forward return and the unconditional benchmark</h3>
 <div class="eq">$$R_{t\to t+k}=\frac{C_{t+k}-C_t}{C_t}\qquad \mu_k(e)=\underset{s\in e}{\text{mean}}\ R_{s\to s+k}$$</div>
@@ -62,12 +62,12 @@ $$\text{Resistance test: }\ C_{t-i}\lt \text{MA}_{t-i}\ (i=1..m)\ \wedge\ H_t\ge
 <p>Multiplying by $s_t$ flips resistance tests so that <b>positive always means “price reacted the way a support/resistance level predicts”</b>; the two directions can then be pooled.</p>
 <h3>Bounce</h3>
 <div class="eq">$$\text{Support: }\ \mathbb 1\Big[C_{t+k}\gt C_t\ \wedge\ C_u\ge \text{MA}_u-\beta\,\text{ATR}_t\ \ \forall u\in[t,t+k]\Big]$$</div>
-<p>Price must finish higher <i>and</i> never close more than $\beta=1.5$ ATR through the line (frozen ATR from the event day; the line itself moves). Resistance is the mirror image. If the window runs past the end of the data the bounce is missing — never counted as a failure.</p>
+<p>Price must finish higher <i>and</i> never close more than $\beta=1.5$ ATR through the line (frozen ATR from the event day; the line itself moves). Resistance is the mirror image. If the window runs past the end of the data the bounce is missing, never counted as a failure.</p>
 <h3>Event-study path</h3>
 <div class="eq">$$\text{AR}_j=\frac{C_{t+j}}{C_{t-5}}-1-\mu^{\text{path}}_j(e),\qquad j=-5,\dots,10$$</div>
 <p>Plotted as the average across events with a 95% band $\bar x\pm1.96\,\text{SE}$.</p>
 
-<h2 id="m-ci">6 · Confidence intervals</h2>
+<h2 id="m-ci">6. Confidence intervals</h2>
 <p><b>Bounce rates</b> use the Wilson score interval, which behaves well for small samples and extreme rates ($\hat p=x/n$, $z=1.96$):</p>
 <div class="eq">$$\frac{\hat p+\frac{z^2}{2n}\ \pm\ z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^2}}}{1+\frac{z^2}{n}}$$</div>
 <p><b>Mean CAR</b> uses a Student-$t$ interval, $\bar x\pm t_{n-1,\,0.975}\,s/\sqrt n$.</p>
@@ -75,11 +75,11 @@ $$\text{Resistance test: }\ C_{t-i}\lt \text{MA}_{t-i}\ (i=1..m)\ \wedge\ H_t\ge
 <div class="grid2"><div><label class="lbl">Successes</label><input id="c-x" type="number" value="7"></div><div><label class="lbl">Trials</label><input id="c-n" type="number" value="20"></div></div>
 <output id="c-wilson-out" style="white-space:pre"></output></div>
 
-<h2 id="m-tests">7 · Target vs control</h2>
+<h2 id="m-tests">7. Target vs control</h2>
 <p>For each era and metric, with $\Delta=\bar y_{\text{target}}-\bar y_{\text{control}}$ (positive is the direction the hypothesis predicts), the lab reports Student's two-sample $t$, Welch's $t$ (unequal variances), the Mann-Whitney $U$ test (rank-based), and a <b>year-cluster bootstrap</b>.</p>
-<div class="callout warn"><b>Why the first three are not enough.</b> They assume the two samples are independent. They are not: both lines are tested on the <i>same price path</i> and share many events. That makes them <i>conservative</i> — on simulated data with no effect they reject only about 1% of the time at a nominal 5%. Events within a year are also dependent. The cluster bootstrap accounts for both, so it is the p-value to trust.</div>
+<div class="callout warn"><b>Why the first three are not enough.</b> They assume the two samples are independent. They are not: both lines are tested on the <i>same price path</i> and share many events. That makes them <i>conservative</i>, on simulated data with no effect they reject only about 1% of the time at a nominal 5%. Events within a year are also dependent. The cluster bootstrap accounts for both, so it is the p-value to trust.</div>
 
-<h2 id="m-boot">8 · The year-cluster bootstrap</h2>
+<h2 id="m-boot">8. The year-cluster bootstrap</h2>
 <ol>
 <li>Group events by calendar year; a year keeps <i>both</i> lines' events together.</li>
 <li>Resample whole years with replacement, $B$ times (the “Bootstrap reps” setting).</li>
@@ -89,7 +89,7 @@ $$\text{Resistance test: }\ C_{t-i}\lt \text{MA}_{t-i}\ (i=1..m)\ \wedge\ H_t\ge
 </ol>
 <p>With fewer than 5 distinct years the bootstrap is meaningless, so the lab reports <b>n/a</b> instead of a number. Calibrated on 60 simulated no-effect histories it rejects about 5–9% of the time at a nominal 5%: slightly liberal when an era has few years.</p>
 
-<h2 id="m-did">9 · Eras and “did the effect grow?”</h2>
+<h2 id="m-did">9. Eras and “did the effect grow?”</h2>
 <p>You can define any number of eras (2–8) by the last year of each, split each asset's history into equal slices, or use the default regimes (1950–1990, 1991–2007, 2008+) for assets with long histories. An era is just a label on each date; every benchmark is computed within the era.</p>
 <p>The estimand for H3 is a <b>difference-in-differences</b> between the early era you pick and the late era you pick:</p>
 <div class="eq">$$\text{DiD}=\underbrace{(\bar y_{\text{target}}-\bar y_{\text{control}})_{\text{late}}}_{\Delta_{\text{late}}}-\underbrace{(\bar y_{\text{target}}-\bar y_{\text{control}})_{\text{early}}}_{\Delta_{\text{early}}}$$</div>
@@ -102,11 +102,11 @@ $T=1$ for the target line. The interaction coefficient for the late era is the D
 $$\hat V=\frac{G}{G-1}\frac{N-1}{N-K}(X^\top X)^{-1}\Big(\sum_g X_g^\top\hat u_g\hat u_g^\top X_g\Big)(X^\top X)^{-1}$$ with $p$-values from $t_{G-1}$.</li>
 </ul>
 
-<h2 id="m-scan">10 · The line scan: is the target special?</h2>
+<h2 id="m-scan">10. The line scan: is the target special?</h2>
 <p>Comparing against one or two hand-picked controls is arbitrary. The <b>Line scan</b> tab runs the same event study for every line length in a range (e.g. 20 to 400) and asks where your target lands among them. If the 200 were a genuine focal point it should stand out from its neighbours; if it sits in the middle of the pack, <i>any</i> line would have looked as good.</p>
 <p>The empirical one-sided p-value is $\dfrac{1+\#\{\text{other lines with metric}\ge\text{target}\}}{M+1}$ over the $M$ other lines. Lines within a few bars of the target are excluded because they share almost all their events; even so, nearby lines are strongly correlated, so treat this as a guide rather than a formal test.</p>
 
-<h2 id="m-read">11 · Reading the charts</h2>
+<h2 id="m-read">11. Reading the charts</h2>
 <table class="dt"><thead><tr><th>Where</th><th>What to look for</th></tr></thead><tbody>
 <tr><td><b>Overview</b></td><td>Plain-language verdicts for each asset and control, a scoreboard, and every caveat. Verdicts use the horizon chosen above; resist shopping across horizons.</td></tr>
 <tr><td><b>Price &amp; events</b></td><td>Where the touches happened (▲ support, ▼ resistance) relative to price and lines, with era boundaries.</td></tr>
@@ -117,7 +117,7 @@ $$\hat V=\frac{G}{G-1}\frac{N-1}{N-K}(X^\top X)^{-1}\Big(\sum_g X_g^\top\hat u_g
 <tr><td><b>Event explorer</b></td><td>Click any event to see the candles, band, failure level and every definition checked step by step.</td></tr>
 </tbody></table>
 
-<h2 id="m-limits">12 · Limits and honest caveats</h2>
+<h2 id="m-limits">12. Limits and honest caveats</h2>
 <ul>
 <li><b>Multiple testing.</b> Assets × controls × horizons × eras × metrics is dozens of p-values with no correction. About 1 in 20 will cross 0.05 by luck. A hit at one horizon, in one era, on one asset is weak evidence.</li>
 <li><b>Few events.</b> Eras often contain tens of events per line, so intervals are wide and power for small effects is low.</li>
@@ -129,7 +129,7 @@ $$\hat V=\frac{G}{G-1}\frac{N-1}{N-K}(X^\top X)^{-1}\Big(\sum_g X_g^\top\hat u_g
 <li><b>Not advice.</b> This is a research tool; it ignores costs, slippage and position sizing.</li>
 </ul>
 
-<h2 id="m-gloss">13 · Glossary</h2>
+<h2 id="m-gloss">13. Glossary</h2>
 <table class="dt"><tbody>
 <tr><td><b>ATR</b></td><td>Average True Range: typical daily price movement.</td></tr>
 <tr><td><b>Abnormal return</b></td><td>Return minus what an average day of the same era delivered.</td></tr>

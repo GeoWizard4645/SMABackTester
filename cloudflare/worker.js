@@ -1,16 +1,18 @@
-// Cloudflare Worker: same-origin data proxy for vivaanshahani.com/FinanceProjectTests
+// Cloudflare Worker: same-origin data proxy for the Finance Lab site (any hostname, any path prefix)
 //
 // Browsers cannot call Yahoo Finance or Kalshi directly (no CORS headers; Kalshi answers 403 to any
 // request carrying a browser Origin header). The page therefore asks THIS worker, which forwards a
 // small allowlist of read-only GET requests from Cloudflare's servers.
 //
-//   <BASE>/yahoo?symbol=AAPL&period1=..&period2=..          -> Yahoo daily chart JSON
-//   <BASE>/kalshi/<markets|series|events|historical>/...     -> Kalshi public API v2
-//   <BASE>/coinbase/products/<PRODUCT>/candles?...           -> Coinbase Exchange candles
+//   /api/proxy/yahoo?symbol=AAPL&period1=..&period2=..          -> Yahoo daily chart JSON
+//   /api/proxy/kalshi/<markets|series|events|historical>/...     -> Kalshi public API v2
+//   /api/proxy/coinbase/products/<PRODUCT>/candles?...           -> Coinbase Exchange candles
 //
-// Route this worker to  vivaanshahani.com/FinanceProjectTests/api/proxy/*  (see wrangler.toml).
+// The page asks for "api/proxy/..." relative to wherever it is hosted, so the worker only looks for the
+// "/api/proxy/" marker: it works at https://financetests.vivaanshahani.com/api/proxy/... and equally at
+// https://vivaanshahani.com/FinanceProjectTests/api/proxy/... Routes are set in wrangler.toml.
 
-const BASE = "/FinanceProjectTests/api/proxy";
+const MARK = "/api/proxy/";
 
 const UPSTREAMS = {
   kalshi: "https://api.elections.kalshi.com/trade-api/v2",
@@ -34,18 +36,20 @@ async function forward(url, ttl, ctx) {
     upstream = await fetch(url, {
       method: "GET",
       headers: { "User-Agent": UA, Accept: "application/json" }, // deliberately NO Origin / Referer / Cookie
-      cf: { cacheTtl: ttl, cacheEverything: true },
+      // cache good answers only: never keep a 429 / 5xx around for the next visitor
+      cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": ttl, "300-599": -1 } },
     });
   } catch (err) {
     return json({ error: `upstream unreachable: ${err.message}` }, 502);
   }
   const body = await upstream.arrayBuffer();
   if (body.byteLength > 25 * 1024 * 1024) return json({ error: "upstream response too large" }, 502);
+  const ok = upstream.status >= 200 && upstream.status < 300;
   return new Response(body, {
     status: upstream.status,
     headers: {
       "content-type": upstream.headers.get("content-type") || "application/json",
-      "cache-control": `public, max-age=${ttl}`,
+      "cache-control": ok ? `public, max-age=${ttl}` : "no-store",
       "access-control-allow-origin": "*",
     },
   });
@@ -58,8 +62,9 @@ export async function handle(request, ctx) {
   if (request.method !== "GET") return json({ error: "method not allowed" }, 405);
 
   const url = new URL(request.url);
-  if (!url.pathname.startsWith(BASE + "/")) return json({ error: "not found" }, 404);
-  const rest = url.pathname.slice(BASE.length + 1);
+  const at = url.pathname.indexOf(MARK);
+  if (at < 0) return json({ error: "not found" }, 404);
+  const rest = url.pathname.slice(at + MARK.length);
 
   if (rest === "yahoo") {
     const symbol = url.searchParams.get("symbol") || "";
