@@ -1,6 +1,7 @@
 """Build the website.
 
     python build_static.py              # -> dist/index.html   (ONE self-contained file) + dist/cloudflare/
+    python build_static.py --no-snapshot  # skip the saved live Kalshi run (offline / faster)
 
 `dist/index.html` has the styles, the JavaScript, the Python sources and the maths page inlined, so
 publishing that single file is enough: nothing can be left behind. It needs only the data proxy
@@ -18,6 +19,7 @@ import json
 import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import appmeta
@@ -50,6 +52,18 @@ def _safe_json(obj) -> str:
     return json.dumps(obj, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
 
 
+def kalshi_snapshot(days: float) -> dict | None:
+    """Run the default Kalshi study on LIVE data now, so the page opens with the main breakdown already on screen."""
+    print(f"computing the saved Kalshi run ({days:g} days of live data; about a minute)...")
+    try:
+        result = web.run_lab({**web.DEFAULTS, "source": "live", "days": days})
+    except Exception as exc:  # no network, API down, rate limited ...
+        print(f"  skipped: {exc}\n  (the page will open on an empty Kalshi tab; press Run there)")
+        return None
+    result["snapshot_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return result
+
+
 def bundle_js() -> str:
     cmd = ["npx", "--yes", ESBUILD, str(ROOT / "static/js/main.js"), "--bundle", "--format=esm", "--minify",
            "--target=es2020", "--log-level=warning"]
@@ -62,7 +76,7 @@ def bundle_js() -> str:
     return res.stdout.replace("</script", "<\\/script")
 
 
-def build_single(out: Path) -> Path:
+def build_single(out: Path, snapshot: dict | None = None) -> Path:
     html = (ROOT / "static/index.html").read_text(encoding="utf-8")
     css = (ROOT / "static/style.css").read_text(encoding="utf-8")
     method = (ROOT / "static/method.html").read_text(encoding="utf-8")
@@ -74,7 +88,8 @@ def build_single(out: Path) -> Path:
     if link not in html or entry not in html:
         raise SystemExit("static/index.html no longer has the expected stylesheet / script tags")
     html = html.replace(link, f"<style>\n{css}\n</style>")
-    inline = "\n".join([
+    snap = [f'<script type="application/json" id="kalshi-snapshot">{_safe_json(snapshot)}</script>'] if snapshot else []
+    inline = "\n".join(snap + [
         f'<script type="application/json" id="meta-json">{_safe_json(meta_dict())}</script>',
         f'<script type="application/json" id="py-files">{_safe_json(files)}</script>',
         f'<script type="text/plain" id="pyworker-src">{worker}</script>',
@@ -122,6 +137,9 @@ def main() -> None:
     ap.add_argument("--out", default="dist")
     ap.add_argument("--multi", action="store_true", help="also write the multi-file layout to <out>/site/")
     ap.add_argument("--meta-only", action="store_true", help="only refresh static/meta.json (local Flask server)")
+    ap.add_argument("--no-snapshot", action="store_true", help="skip the saved live Kalshi run (faster, works offline)")
+    ap.add_argument("--snapshot-days", type=float, default=14, help="days of live data in the saved Kalshi run")
+    ap.add_argument("--reuse-snapshot", action="store_true", help="embed the previous saved Kalshi run instead of recomputing it")
     args = ap.parse_args()
     write_meta(ROOT / "static/meta.json")
     if args.meta_only:
@@ -132,9 +150,18 @@ def main() -> None:
         for stale in ("index.html", "cloudflare", "functions", "FinanceProjectTests"):
             p = out / stale
             shutil.rmtree(p) if p.is_dir() else p.unlink(missing_ok=True)
-    page = build_single(out)
+    snap_file = ROOT / "static/kalshi_snapshot.json"  # lets the local Flask server show the same saved run
+    if args.reuse_snapshot and snap_file.exists():
+        snapshot = json.loads(snap_file.read_text(encoding="utf-8"))
+    else:
+        snapshot = None if args.no_snapshot else kalshi_snapshot(args.snapshot_days)
+    if snapshot:
+        snap_file.write_text(json.dumps(snapshot), encoding="utf-8")
+    else:
+        snap_file.unlink(missing_ok=True)
+    page = build_single(out, snapshot)
     build_extras(out)
-    print(f"built {page}  ({page.stat().st_size / 1024:.0f} KB, single file)")
+    print(f"built {page}  ({page.stat().st_size / 1024:.0f} KB, single file, saved Kalshi run: {'yes' if snapshot else 'no'})")
     if args.multi:
         print(f"built {build_multi(out)}  (multi-file layout)")
 

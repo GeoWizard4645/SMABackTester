@@ -261,7 +261,31 @@ Kalshi's 15-minute crypto contracts ask *"will the price at expiry be at or abov
 
 At each checkpoint "N minutes before expiry" the lab takes the latest known trade price, bid and ask (forward-filled, discarded if older than 3 minutes). Kalshi's batch-candle endpoint rejects any request where *tickers × minutes spanned > 10,000*, so markets are batched greedily under that budget.
 
-### 5.3 Definitions
+### 5.3 Removing BTC's trend (the fair-value benchmark)
+
+Comparing the Yes price with how often Yes won mixes three things: **mispricing** (the behavioral part), **BTC's drift** during the sample, and **luck**. A week in which BTC happened to rise makes Yes look cheap; a week in which it fell makes it look expensive. To isolate behavior the lab compares the Yes price with a **fair value computed only from what was known at that moment**: BTC spot $S$, strike $K$, minutes left $m$ and the trailing per-minute volatility $v$ (the previous hour of 1-minute Coinbase returns), with zero drift:
+
+$$\text{fair}=\Phi\!\left(\frac{\operatorname{sign}(z)\,|z|^{\gamma}}{s}\right),\qquad z=\frac{\ln(S/K)}{v\sqrt{m-\tfrac23}}$$
+
+The $\tfrac23$ accounts for settlement averaging the last 60 seconds of the index. Nothing here looks at what BTC did afterwards, so the benchmark contains neither trend nor luck. The **mispricing** of a contract is $P_{\text{yes}}-100\cdot\text{fair}$ cents, reported with a day-cluster bootstrap interval.
+
+* **Fitted shape.** The volatility multiplier $s$ and tail exponent $\gamma$ are fitted to the sample by maximum likelihood (or you can fix $s$). The family is odd in $z$, so it can stretch or flatten the probabilities but can never tilt them up or down: a trend cannot be absorbed by the fit. This matters on real data: with plain $\gamma=s=1$ the model was under-confident in the middle and over-confident in the tails.
+* **Profit split.** If fair value were the truth, buying a No at cost $c$ earns an expected $100(1-\text{fair})-c$ before fees: the **edge from mispricing**. Realised minus expected payout is **luck and trend**. They add up to the actual net profit, trade by trade.
+* **Checked on simulated markets:** with no planted bias the premium is about 0; a planted 4¢ bias is found; and with BTC trending +8% a day the raw gap swings to −4¢ (wrongly saying Yes is cheap) while the premium stays near 0.
+* **Honest limit.** Kalshi's own prices predict outcomes *better* than any model built only from spot, strike, time and volatility (they also reflect order flow and other venues). So part of a gap between price and model can be information, not behavior; the overall average gap is more reliable than the gap in any single bin. The page shows this comparison under "Check the fair-value model itself".
+
+### 5.3b The saved run (the page opens with results)
+
+`python build_static.py` runs the default study on **live data** at build time (14 days by default; about 30 seconds) and embeds the result in `index.html`, so the Kalshi tab opens with the main breakdown already on screen and without starting Python or calling Kalshi. It is labelled "Saved run" with its timestamp; **Run** recomputes with your settings. Rebuild and republish to refresh it.
+
+```bash
+python build_static.py                     # recompute the saved run from live data
+python build_static.py --reuse-snapshot    # reuse the previous saved run (fast, offline)
+python build_static.py --no-snapshot       # no saved run: the Kalshi tab opens empty
+python build_static.py --snapshot-days 30  # a longer saved run
+```
+
+### 5.4 Definitions
 
 **Calibration.** Contracts are binned by Yes price. In each bin the implied probability is the mean Yes price $\bar P$ and the realised rate is $\hat p$:
 
@@ -290,13 +314,13 @@ The fee is symmetric in $P$. A trade profits only if the win rate exceeds the br
 
 Metrics: **ROI** = net profit ÷ capital deployed (entry cost + fees); **profit factor** = winning ÷ losing trades after fees; **max drawdown** = largest peak-to-trough fall of cumulative net profit; **Sharpe** from daily profit with $\sqrt{365}$; a one-sample $t$-test of mean net profit per trade; and a **day-cluster bootstrap** CI (whole days resampled, since trades within a day are dependent).
 
-### 5.4 What you can change in the website
+### 5.5 What you can change in the website
 
-Data source (live / auto / synthetic), which 15-minute market (BTC, ETH, SOL, XRP, DOGE, BNB, HYPE), number of days or exact dates, **timing** (which checkpoints to extract, the entry checkpoint, expiry hours in UTC, weekdays), price used (last trade / midpoint / executable), upside-vs-downside reference, bin width, tails, p-value test, the three rules plus a custom rule, contracts per trade, fee schedule (taker / half / maker-like / none / custom), capital, and the synthetic-data knobs.
+Data source (live / auto / synthetic), the fair-value benchmark's volatility window, multiplier and index alignment, which 15-minute market (BTC, ETH, SOL, XRP, DOGE, BNB, HYPE), number of days or exact dates, **timing** (which checkpoints to extract, the entry checkpoint, expiry hours in UTC, weekdays), price used (last trade / midpoint / executable), upside-vs-downside reference, bin width, tails, p-value test, the three rules plus a custom rule, contracts per trade, fee schedule (taker / half / maker-like / none / custom), capital, and the synthetic-data knobs (including a BTC trend that moves outcomes but not prices, to show the benchmark ignoring it).
 
 **Python console tab.** Real Python in the browser with `raw`, `frame`, `params`, `trades`, `pd`, `np`, and the lab's modules preloaded. Six runnable examples (entry-time sweep, hour-of-day, fee sensitivity, bootstrap CI, matplotlib plot, custom rule); edit and run (Ctrl/⌘+Enter). Packages such as matplotlib load on first import.
 
-### 5.5 Caveats
+### 5.6 Caveats
 
 * **Small samples.** A week is ≈ 670 contracts spread over bins and splits. A bin of 25 contracts has a ±20 pp interval; apparent overpricing there is mostly noise.
 * **Many tests.** Splits × bins × rules multiply false positives. Do not tune the checkpoint, price range and rule until something works.
@@ -320,7 +344,7 @@ Data source (live / auto / synthetic), which 15-minute market (BTC, ETH, SOL, XR
 | `static/` | Page source: `index.html`, `style.css`, `method.html`, `js/` (`main`, `kalshi`, `controls`, `charts`, `tables`, `engine`, `pyworker`, `util`). `build_static.py` inlines all of it into one file |
 | `cloudflare/` | `worker.js` (data proxy), `wrangler.toml`, `test_worker.mjs` |
 | `build_static.py`, `serve_dist.py` | Build the single-file site (`dist/index.html`); rehearse production locally |
-| `tests/` | 28 pytest tests (indicators, events, statistics, fees, backtest arithmetic, API validation, end-to-end) |
+| `tests/` | 34 pytest tests (indicators, events, statistics, fees, backtest arithmetic, API validation, end-to-end) |
 
 ---
 

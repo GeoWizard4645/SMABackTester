@@ -73,12 +73,57 @@ def by_hour(frame: pd.DataFrame) -> list[dict]:
     rows = []
     for hr, g in frame.groupby("hour"):
         n = len(g)
+        has = g["fair"].notna().any() if "fair" in g else False
         rows.append({"hour": int(hr), "count": n, "avg_yes": float(g["yes_price"].mean()),
                      "actual_pct": float(100 * g["result"].mean()),
-                     "gap": float(g["yes_price"].mean() - 100 * g["result"].mean())})
+                     "gap": float(g["yes_price"].mean() - 100 * g["result"].mean()),
+                     "premium": float(g["premium"].mean()) if has else None})
     return rows
 
 
 def calibration_report(frame: pd.DataFrame, **kw) -> dict[str, dict]:
     """The three standard splits: all / upside / downside strikes."""
     return {s: calibrate(frame, s, **kw) for s in SPLITS}
+
+
+def fair_table(frame: pd.DataFrame, split: str = "all", width: int = 10, n_boot: int = 1500, seed: int = 0) -> dict:
+    """Trend-free comparison of the Yes price with model fair value, binned by FAIR probability.
+
+    Per bin: contract count, average fair probability (%), average Yes price (cents), the premium
+    (price - fair, positive = Yes overpriced) with a day-cluster bootstrap CI and p-value, and, as a check
+    on the model itself, the share of contracts that really resolved Yes (Wilson CI). If the realised rate
+    tracks the fair probability, the benchmark can be trusted.
+    """
+    f = frame[frame["fair"].notna()]
+    if split != "all":
+        f = f[f["direction"] == split]
+    edges = list(range(0, 101, width))
+    if edges[-1] != 100:
+        edges.append(100)
+    fair = (f["fair"] * 100).to_numpy()
+    day = pd.to_datetime(f["close_time"]).dt.date.to_numpy()
+    rows = []
+    for i in range(len(edges) - 1):
+        a, b = edges[i], edges[i + 1]
+        m = (fair >= a) & ((fair < b) if b < 100 else (fair <= b))
+        rows.append(_fair_row(f"{a}-{b}%", a, b, f[m], day[m], n_boot, seed))
+    return {"split": split, "rows": rows, "overall": _fair_row("ALL", 0, 100, f, day, n_boot, seed)}
+
+
+def _fair_row(label: str, a: int, b: int, f: pd.DataFrame, day: np.ndarray, n_boot: int, seed: int) -> dict:
+    n = len(f)
+    blank = {"bin": label, "lo": a, "hi": b, "count": n, "avg_fair": None, "avg_price": None, "premium": None,
+             "ci_lo": None, "ci_hi": None, "p_value": None, "realized_pct": None, "real_lo": None, "real_hi": None}
+    if n == 0:
+        return blank
+    test = stats.cluster_mean_test(f["premium"].to_numpy(), day, n_boot, seed)
+    wins = float(f["result"].sum())
+    lo, hi = stats.wilson_ci(wins, n)
+    blank.update(avg_fair=float(100 * f["fair"].mean()), avg_price=float(f["yes_price"].mean()), premium=test["mean"],
+                 ci_lo=test["lo"], ci_hi=test["hi"], p_value=test["p"], realized_pct=100 * wins / n,
+                 real_lo=100 * lo, real_hi=100 * hi)
+    return blank
+
+
+def fair_report(frame: pd.DataFrame, **kw) -> dict[str, dict]:
+    return {s: fair_table(frame, s, **kw) for s in SPLITS}

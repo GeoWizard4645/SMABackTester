@@ -63,6 +63,30 @@ def implied_vs_realized_p(prices_cents: np.ndarray, outcomes: np.ndarray, method
     raise ValueError(f"p_test must be one of {P_TESTS}")
 
 
+def cluster_mean_test(values, days, n_boot: int = 2000, seed: int = 0) -> dict:
+    """Mean of ``values`` with a day-cluster bootstrap 95% CI and recentred two-sided p-value (H0: mean = 0).
+
+    Contracts expiring on the same day share market conditions, so whole days are resampled. With fewer
+    than 5 distinct days no interval is reported.
+    """
+    values = np.asarray(values, dtype=float)
+    keep = ~np.isnan(values)
+    values, days = values[keep], np.asarray(days)[keep]
+    n = len(values)
+    out = {"n": n, "mean": float(values.mean()) if n else None, "lo": None, "hi": None, "p": None}
+    uniq, inv = np.unique(days, return_inverse=True)
+    if n == 0 or len(uniq) < 5:
+        return out
+    sums = np.bincount(inv, weights=values)
+    cnt = np.bincount(inv).astype(float)
+    idx = np.random.default_rng(seed).integers(0, len(uniq), size=(n_boot, len(uniq)))
+    means = sums[idx].sum(1) / cnt[idx].sum(1)
+    m = float(values.mean())
+    out.update(lo=float(np.quantile(means, 0.025)), hi=float(np.quantile(means, 0.975)),
+               p=float(min(1.0, (1 + np.sum(np.abs(means - m) >= abs(m))) / (n_boot + 1))))
+    return out
+
+
 def _compare_groups(up: np.ndarray, dn: np.ndarray) -> dict:
     out = {"n_upside": len(up), "n_downside": len(dn), "gap_upside": float(up.mean()) if len(up) else None,
            "gap_downside": float(dn.mean()) if len(dn) else None, "diff": None, "welch_p": None,
@@ -82,7 +106,7 @@ def _compare_groups(up: np.ndarray, dn: np.ndarray) -> dict:
     return out
 
 
-def asymmetry_test(frame: pd.DataFrame, overlap: tuple[float, float] = (40.0, 60.0)) -> dict:
+def asymmetry_test(frame: pd.DataFrame, overlap: tuple[float, float] = (40.0, 60.0), measure: str = "raw") -> dict:
     """Is the optimism bias different for upside strikes (K > spot) than downside (K < spot)?
 
     Per contract the *overpricing residual* is r = Yes price - realised outcome (as a fraction);
@@ -95,7 +119,11 @@ def asymmetry_test(frame: pd.DataFrame, overlap: tuple[float, float] = (40.0, 60
     * ``matched`` - only contracts with Yes priced inside ``overlap`` cents, where both
                     directions trade, which holds the price level roughly fixed.
     """
-    r = frame["yes_price"] / 100.0 - frame["result"]
+    if measure == "fair":  # trend-free: price minus model fair value
+        frame = frame[frame["fair"].notna()]
+        r = frame["premium"] / 100.0
+    else:  # price minus what actually happened (includes trend and luck)
+        r = frame["yes_price"] / 100.0 - frame["result"]
     is_up, is_dn = frame["direction"] == "upside", frame["direction"] == "downside"
     raw = _compare_groups(r[is_up].to_numpy(), r[is_dn].to_numpy())
     lo, hi = overlap
@@ -130,7 +158,8 @@ def strategy_metrics(trades: pd.DataFrame, capital: float = 1000.0) -> dict:
         res = sst.ttest_1samp(net, 0.0)
         t_stat, p_val = float(res.statistic), float(res.pvalue)
     contracts = trades["contracts"].to_numpy(dtype=float)
-    return {
+    extra = _edge_metrics(trades)
+    return {**extra,
         "trades": n, "wins": wins, "win_rate": wins / n,
         "gross_profit": float(gross), "fees": float(fee), "net_profit": float(net.sum() / 100),
         "roi_pct": float(100 * (net.sum() / 100) / (cost + fee)) if cost + fee > 0 else None,
@@ -140,6 +169,28 @@ def strategy_metrics(trades: pd.DataFrame, capital: float = 1000.0) -> dict:
         "t_stat": t_stat, "p_value": p_val,
         "breakeven_win_rate": float(((trades["cost"] + trades["fee"]) / (100 * contracts)).mean()),
     }
+
+
+def _edge_metrics(trades: pd.DataFrame) -> dict:
+    """Split realised profit into the part explained by mispricing and the part that is luck / BTC's trend.
+
+    For every trade, ``edge_gross`` is the profit you would expect if the model's fair probability were the
+    truth (expected payout minus price paid): that is exactly the mispricing captured. ``luck`` is realised
+    payout minus expected payout. realised net = edge_net + luck, trade by trade.
+    """
+    blank = {"edge_net_profit": None, "luck": None, "edge_cents": None, "edge_ci": None, "edge_p": None}
+    if "edge_net" not in trades.columns:
+        return blank
+    e = trades["edge_net"].to_numpy(dtype=float)
+    ok = ~np.isnan(e)
+    if not ok.any():
+        return blank
+    t = trades[ok]
+    per = (t["edge_net"] / t["contracts"]).to_numpy(dtype=float)
+    test = cluster_mean_test(per, pd.to_datetime(t["time"]).dt.date.to_numpy())
+    return {"edge_net_profit": float(t["edge_net"].sum() / 100), "luck": float(t["luck"].sum() / 100),
+            "edge_cents": test["mean"], "edge_ci": [test["lo"], test["hi"]] if test["lo"] is not None else None,
+            "edge_p": test["p"]}
 
 
 def day_cluster_bootstrap_mean(values: np.ndarray, days: np.ndarray, n_boot: int = 2000, seed: int = 0) -> tuple[float, float]:

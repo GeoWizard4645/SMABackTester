@@ -48,6 +48,8 @@ def run_rule(frame: pd.DataFrame, rule: Rule, price_source: str = "trade", contr
     Payout: 100c per winning contract (No wins if the market settles No), else 0.
     """
     f = frame
+    if "fair" in f.columns:  # the decomposition needs the benchmark; rows without it are skipped
+        f = f[f["fair"].notna()]
     if rule.direction:
         f = f[f["direction"] == rule.direction]
     f = f[(f["yes_price"] >= rule.min_price) & (f["yes_price"] <= rule.max_price)]
@@ -66,20 +68,25 @@ def run_rule(frame: pd.DataFrame, rule: Rule, price_source: str = "trade", contr
     cost = entry * contracts
     payout = np.where(won, 100.0 * contracts, 0.0)
     fee = np.array([kalshi_fee_cents(e, contracts, fee_rate) for e in entry], dtype=float)
+    fair = f["fair"].to_numpy(dtype=float) if "fair" in f.columns else np.full(len(f), np.nan)
+    exp_payout = 100.0 * contracts * (fair if rule.side == "yes" else 1.0 - fair)  # if fair value were the truth
     trades = pd.DataFrame({
         "ticker": f["ticker"].to_numpy(), "time": pd.to_datetime(f["close_time"]).to_numpy(), "side": rule.side,
         "yes_price": f["yes_price"].to_numpy(), "direction": f["direction"].to_numpy(),
         "entry": entry, "contracts": contracts, "cost": cost, "result": f["result"].to_numpy(),
         "won": won, "payout": payout, "gross": payout - cost, "fee": fee, "net": payout - cost - fee,
+        "fair": fair, "exp_payout": exp_payout, "edge_gross": exp_payout - cost, "edge_net": exp_payout - cost - fee,
+        "luck": payout - exp_payout,
     })
     trades = trades.sort_values("time").reset_index(drop=True)
     trades["cum_net"] = trades["net"].cumsum() / 100.0
+    trades["cum_edge"] = trades["edge_net"].fillna(0).cumsum() / 100.0
     return trades
 
 
 def _empty() -> pd.DataFrame:
     cols = ["ticker", "time", "side", "yes_price", "direction", "entry", "contracts", "cost", "result", "won",
-            "payout", "gross", "fee", "net", "cum_net"]
+            "payout", "gross", "fee", "net", "cum_net", "fair", "exp_payout", "edge_gross", "edge_net", "luck", "cum_edge"]
     return pd.DataFrame({c: [] for c in cols})
 
 

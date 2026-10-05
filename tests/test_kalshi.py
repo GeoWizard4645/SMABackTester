@@ -114,3 +114,59 @@ def test_console_captures_output_errors_and_state():
     bad = web.run_code("1/0")
     assert "ZeroDivisionError" in bad["error"]
     web.reset_console()
+
+
+# ---------------------------------------------------------------- trend-free fair-value benchmark
+def _prem(**kw):
+    d = kalshi_data.synthetic("KXBTC15M", datetime(2026, 1, 1), datetime(2026, 3, 1), (5,), seed=3, **kw)
+    f = kalshi_data.analysis_frame(d, 5, "mid")
+    return f, f.premium.dropna().mean(), f.yes_price.mean() - 100 * f.result.mean()
+
+
+def test_fair_value_premium_is_zero_in_a_fair_market_and_finds_planted_bias():
+    _, null, _ = _prem(bias=0, upside_extra=0, noise=0.01)
+    _, planted, _ = _prem(bias=4, upside_extra=0)
+    assert abs(null) < 0.3
+    assert planted > 1.5
+
+
+def test_premium_is_unmoved_by_btc_trend_but_the_raw_gap_is():
+    _, prem0, raw0 = _prem(bias=0, upside_extra=0, noise=0.01, trend=0)
+    _, prem8, raw8 = _prem(bias=0, upside_extra=0, noise=0.01, trend=8)
+    assert abs(prem8 - prem0) < 0.5      # trend-free
+    assert abs(raw8 - raw0) > 2.0        # the unadjusted gap is badly contaminated
+
+
+def test_fair_shape_is_symmetric_so_it_cannot_absorb_a_trend():
+    rng = np.random.default_rng(0)
+    z = rng.normal(0, 1.2, 800)
+    y = (rng.uniform(size=800) < 1 / (1 + np.exp(-1.3 * z))).astype(float)
+    s, g = kalshi_data._fit_shape(z, y)
+    from scipy.stats import norm
+    f = lambda zz: norm.cdf(np.sign(zz) * np.abs(zz) ** g / s)
+    assert np.allclose(f(z) + f(-z), 1.0)  # odd about the strike: P(z) + P(-z) = 1
+
+
+def test_profit_splits_exactly_into_mispricing_and_luck():
+    d = kalshi_data.synthetic("KXBTC15M", datetime(2026, 1, 1), datetime(2026, 1, 15), (5,), seed=4)
+    f = kalshi_data.analysis_frame(d, 5, "trade")
+    t = backtest.run_rule(f, backtest.Rule("all", "no"))
+    assert np.allclose(t["net"], t["edge_net"] + t["luck"])
+    m = stats.strategy_metrics(t)
+    assert m["net_profit"] == pytest.approx(m["edge_net_profit"] + m["luck"])
+
+
+def test_cluster_mean_test_needs_days_and_detects_a_shift():
+    rng = np.random.default_rng(1)
+    days = np.repeat(np.arange(30), 20)
+    out = stats.cluster_mean_test(rng.normal(1.0, 1.0, 600), days, 800)
+    assert out["lo"] > 0 and out["p"] < 0.01
+    assert stats.cluster_mean_test([1.0, 2.0], [1, 2])["lo"] is None
+
+
+def test_lab_result_has_headline_and_fair_tables():
+    r = web.run_lab({"source": "synthetic", "days": 6, "seed": 5})
+    h = r["headline"]
+    assert h["n"] > 100 and {"mean_price", "mean_fair", "premium", "luck_gap", "score_market"} <= set(h)
+    assert r["fair"]["all"]["overall"]["count"] == h["n"]
+    assert all(s["edge_net_profit"] is not None for s in r["strategies"])

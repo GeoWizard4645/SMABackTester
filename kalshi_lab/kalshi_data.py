@@ -26,6 +26,7 @@ from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 COINBASE_BASE = "https://api.exchange.coinbase.com"
@@ -254,6 +255,25 @@ def fetch_spot(product: str, start_ts: int, end_ts: int) -> dict[int, float]:
     return out
 
 
+def _vol_series(spot: dict[int, float], window: int) -> tuple[np.ndarray, np.ndarray]:
+    """Trailing per-minute volatility (std of 1-minute log returns) on a regular minute grid.
+
+    The value at grid time t uses only returns up to t, so it is known at the checkpoint (no look-ahead).
+    """
+    ts = np.array(sorted(spot))
+    grid = np.arange(ts[0], ts[-1] + 1, 60)
+    px = pd.Series(spot).reindex(grid).ffill()
+    vol = np.log(px).diff().rolling(window, min_periods=max(15, window // 3)).std()
+    return grid, vol.to_numpy()
+
+
+def _vol_at(grid: np.ndarray, vol: np.ndarray, t: int) -> float:
+    if len(grid) == 0:
+        return float("nan")
+    i = (t - int(grid[0])) // 60
+    return float(vol[i]) if 0 <= i < len(vol) else float("nan")
+
+
 def _asof(ends: list[int], values: list[float], target: int, stale_s: int) -> float:
     i = bisect.bisect_right(ends, target) - 1
     if i < 0 or target - ends[i] > stale_s:
@@ -262,7 +282,8 @@ def _asof(ends: list[int], values: list[float], target: int, stale_s: int) -> fl
 
 
 def pull_live(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_CHECKPOINTS,
-              max_markets: int = 1500, max_stale_min: int = 3, with_spot: bool = True) -> pd.DataFrame:
+              max_markets: int = 1500, max_stale_min: int = 3, with_spot: bool = True,
+              vol_window: int = 60) -> pd.DataFrame:
     """Live contract frame from the public APIs."""
     s_ts, e_ts = int(start.replace(tzinfo=timezone.utc).timestamp()), int(end.replace(tzinfo=timezone.utc).timestamp())
     markets = list_markets(series, s_ts, e_ts, max_markets)
@@ -281,6 +302,7 @@ def pull_live(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_C
         notes.append(f"no spot source for {series}; upside/downside split disabled")
     spot_ends = sorted(spot)
     spot_vals = [spot[k] for k in spot_ends]
+    vgrid, vvol = _vol_series(spot, vol_window) if spot else (np.array([]), np.array([]))
 
     stale = max_stale_min * 60
     rows = []
@@ -302,9 +324,12 @@ def pull_live(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_C
             row[f"bid_{c}"] = _asof(ends, bid, t, stale) if ends else float("nan")
             row[f"ask_{c}"] = _asof(ends, ask, t, stale) if ends else float("nan")
             row[f"spot_{c}"] = _asof(spot_ends, spot_vals, t, 180) if spot else float("nan")
+            row[f"vol_{c}"] = _vol_at(vgrid, vvol, t) if spot else float("nan")
         rows.append(row)
     df = pd.DataFrame(rows)
-    df.attrs.update(source="live", series=series, notes=notes, checkpoints=list(checkpoints))
+    # The settlement value is the average of the last 60 seconds of the index, which shortens the
+    # effective time-to-expiry by 2/3 of a minute in the fair-value model.
+    df.attrs.update(source="live", series=series, notes=notes, checkpoints=list(checkpoints), m_adjust=2 / 3)
     return df
 
 
@@ -314,7 +339,8 @@ def _phi(x):
 
 
 def synthetic(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_CHECKPOINTS, seed: int = 0,
-              bias: float = 3.0, upside_extra: float = 2.0, noise: float = 2.0, annual_vol: float = 0.55) -> pd.DataFrame:
+              bias: float = 3.0, upside_extra: float = 2.0, noise: float = 2.0, annual_vol: float = 0.55,
+              trend: float = 0.0) -> pd.DataFrame:
     """Simulated 15-minute up/down contracts with the same schema as live data.
 
     Spot follows a stochastic-volatility random walk. A contract opens every 15 minutes with
@@ -324,8 +350,10 @@ def synthetic(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_C
         premium = bias * 4 p (1-p)  +  (upside_extra * 4 p (1-p) if the strike is above spot)
 
     so ``bias=0, upside_extra=0`` is a perfectly calibrated market (a null you can test the
-    pipeline against) and larger values plant overpricing for the tests to find. These
-    numbers are assumptions, NOT estimates of the real market.
+    pipeline against) and larger values plant overpricing for the tests to find. ``trend`` is a
+    drift in percent per day applied to spot: it shifts realised outcomes but NOT the quoted prices,
+    so it shows how a trend contaminates raw results while leaving the fair-value premium alone.
+    These numbers are assumptions, NOT estimates of the real market.
     """
     rng = np.random.default_rng(seed)
     t0 = pd.Timestamp(start).floor("15min")
@@ -336,7 +364,7 @@ def synthetic(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_C
     for i in range(1, n_min):
         logvol[i] = 0.995 * logvol[i - 1] + 0.06 * rng.standard_normal()
     sigma = sig_min * np.exp(logvol - logvol.var() / 2)
-    spot = 65_000 * np.exp(np.cumsum(sigma * rng.standard_normal(n_min)))
+    spot = 65_000 * np.exp(np.cumsum(trend / 100.0 / 1440.0 + sigma * rng.standard_normal(n_min)))
 
     opens = np.arange(0, n_min - 15, 15)
     rows = []
@@ -364,9 +392,10 @@ def synthetic(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_C
             row[f"bid_{m}"] = float(np.clip(round(px - spread / 2), 1, 98))
             row[f"ask_{m}"] = float(np.clip(round(px + spread / 2), 2, 99))
             row[f"spot_{m}"] = round(float(s_m), 2)
+            row[f"vol_{m}"] = float(sigma[idx])
         rows.append(row)
     df = pd.DataFrame(rows)
-    df.attrs.update(source="synthetic", series=series, checkpoints=list(checkpoints),
+    df.attrs.update(source="synthetic", series=series, checkpoints=list(checkpoints), m_adjust=0.0,
                     notes=[f"SYNTHETIC data (seed {seed}, bias {bias}¢, upside extra {upside_extra}¢): "
                            "the overpricing is planted by assumption, not measured."])
     return df
@@ -376,26 +405,27 @@ def synthetic(series: str, start: datetime, end: datetime, checkpoints=DEFAULT_C
 def load_contracts(series: str = "KXBTC15M", days: float = 7, end: datetime | None = None,
                    start: datetime | None = None, checkpoints=DEFAULT_CHECKPOINTS, source: str = "auto",
                    seed: int = 0, bias: float = 3.0, upside_extra: float = 2.0, noise: float = 2.0,
-                   max_markets: int = 1500, cache_dir: str | Path | None = None, with_spot: bool = True) -> pd.DataFrame:
+                   max_markets: int = 1500, cache_dir: str | Path | None = None, with_spot: bool = True,
+                   trend: float = 0.0, vol_window: int = 60) -> pd.DataFrame:
     """Contract frame from the live API ('live'), the generator ('synthetic') or live-then-synthetic ('auto')."""
     end = end or datetime.now(timezone.utc).replace(tzinfo=None, second=0, microsecond=0)
     start = start or end - timedelta(days=float(days))
     checkpoints = tuple(sorted({int(c) for c in checkpoints}, reverse=True))
     if source == "synthetic":
-        return synthetic(series, start, end, checkpoints, seed, bias, upside_extra, noise)
+        return synthetic(series, start, end, checkpoints, seed, bias, upside_extra, noise, trend=trend)
     cache_file = None
     if cache_dir and not IS_BROWSER:
-        cache_file = Path(cache_dir) / f"kalshi_{series}_{start:%Y%m%d%H}_{end:%Y%m%d%H}_{'-'.join(map(str, checkpoints))}.csv"
+        cache_file = Path(cache_dir) / f"kalshi_{series}_{start:%Y%m%d%H}_{end:%Y%m%d%H}_{'-'.join(map(str, checkpoints))}_v{vol_window}.csv"
         if cache_file.exists():
             df = pd.read_csv(cache_file, parse_dates=["open_time", "close_time"])
-            df.attrs.update(source="live", series=series, notes=["loaded from local cache"], checkpoints=list(checkpoints))
+            df.attrs.update(source="live", series=series, notes=["loaded from local cache"], checkpoints=list(checkpoints), m_adjust=2 / 3)
             return df
     try:
-        df = pull_live(series, start, end, checkpoints, max_markets, with_spot=with_spot)
+        df = pull_live(series, start, end, checkpoints, max_markets, with_spot=with_spot, vol_window=vol_window)
     except DataError as exc:
         if source == "live":
             raise
-        df = synthetic(series, start, end, checkpoints, seed, bias, upside_extra, noise)
+        df = synthetic(series, start, end, checkpoints, seed, bias, upside_extra, noise, trend=trend)
         df.attrs["notes"] = [f"Live Kalshi data unavailable ({exc}); using SYNTHETIC data instead."] + df.attrs["notes"]
         return df
     if cache_file is not None:
@@ -404,9 +434,66 @@ def load_contracts(series: str = "KXBTC15M", days: float = 7, end: datetime | No
     return df
 
 
+# ------------------------------------------------------------------ fair value (trend-free benchmark)
+def _fit_shape(z0: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+    """Fit P(Yes) = Phi( sign(z0) * |z0|**gamma / s ) to the realised outcomes by maximum likelihood.
+
+    ``s`` rescales the volatility and ``gamma`` bends the tails (gamma < 1 gives fatter tails, i.e. less extreme
+    probabilities far from the strike). The family is odd in z0, so it can stretch or flatten the probabilities
+    but can never tilt them up or down: a trend in BTC cannot be absorbed by the fit. It corrects for the
+    1-minute volatility being inflated by microstructure noise and for volatility changing during the window.
+    """
+    ok = np.isfinite(z0) & np.isfinite(y)
+    if ok.sum() < 150:
+        return 1.0, 1.0
+    z, y = z0[ok], y[ok]
+    zs, za = np.sign(z)[None, None, :], np.abs(z)[None, None, :]
+    gam = np.linspace(0.5, 1.5, 21)[:, None, None]
+    sca = np.linspace(0.3, 2.5, 45)[None, :, None]
+    p = np.clip(norm.cdf(zs * za ** gam / sca), 1e-4, 1 - 1e-4)
+    ll = (y * np.log(p) + (1 - y) * np.log(1 - p)).sum(axis=2)
+    gi, si = np.unravel_index(int(np.argmax(ll)), ll.shape)
+    return float(sca[0, si, 0]), float(gam[gi, 0, 0])
+
+
+def _add_fair_value(out: pd.DataFrame, checkpoint: int, vol_scale: float | None, basis_adjust: bool, m_adjust: float) -> pd.DataFrame:
+    """Model probability that the contract settles Yes, from information available at the checkpoint.
+
+    With zero drift (over at most 14 minutes the expected move is negligible) the log price is a random
+    walk, so for strike K, spot S, per-minute volatility v and m minutes left:
+
+        P(Yes) = Phi( ln(S / K) / (v * sqrt(m_eff)) ),    m_eff = m - 2/3  (settlement averages the last minute)
+
+    Nothing here looks at what BTC did afterwards, so the benchmark carries no trend and no luck.
+    ``basis_adjust`` shifts Coinbase spot by the recent median gap between Kalshi's strike and Coinbase at
+    open (a rolling median of earlier contracts only), aligning Coinbase with the index Kalshi settles on.
+    ``vol_scale=None`` fits the volatility multiplier and tail shape automatically (see ``_fit_shape``);
+    a number fixes the multiplier and leaves the shape alone.
+    """
+    vol_col = f"vol_{checkpoint}"
+    if vol_col not in out.columns or f"spot_{checkpoint}" not in out.columns:
+        out["fair"], out["premium"] = np.nan, np.nan
+        return out
+    spot = out[f"spot_{checkpoint}"]
+    if basis_adjust:
+        basis = (out["strike"] - out["spot_open"]).rolling(100, min_periods=10).median().shift(1).fillna(0.0)
+        spot = spot + basis
+    m_eff = max(checkpoint - m_adjust, 0.25)
+    with np.errstate(all="ignore"):
+        z0 = (np.log(spot / out["strike"]) / (out[vol_col] * math.sqrt(m_eff))).to_numpy()
+    scale, gamma = _fit_shape(z0, out["result"].to_numpy(dtype=float)) if vol_scale is None else (float(vol_scale), 1.0)
+    with np.errstate(all="ignore"):
+        fair = pd.Series(norm.cdf(np.sign(z0) * np.abs(z0) ** gamma / scale), index=out.index).where(np.isfinite(z0)).clip(0.002, 0.998)
+    out["vol_scale"], out["fair_shape"] = scale, gamma
+    out["fair"] = fair
+    out["premium"] = out["yes_price"] - 100.0 * fair
+    return out
+
+
 # ------------------------------------------------------------------ analysis frame
 def analysis_frame(df: pd.DataFrame, checkpoint: int, price_source: str = "trade", spot_ref: str = "checkpoint",
-                   hours: tuple[int, int] | None = None, weekdays: list[int] | None = None) -> pd.DataFrame:
+                   hours: tuple[int, int] | None = None, weekdays: list[int] | None = None,
+                   vol_scale: float | None = None, basis_adjust: bool = True) -> pd.DataFrame:
     """Rows with a usable Yes price at ``checkpoint`` plus the columns the analyses need.
 
     Adds ``yes_price`` (cents), ``yes_bid``, ``yes_ask``, ``direction`` ('upside' if the strike is
@@ -421,7 +508,7 @@ def analysis_frame(df: pd.DataFrame, checkpoint: int, price_source: str = "trade
     need = [f"trade_{checkpoint}", f"bid_{checkpoint}", f"ask_{checkpoint}"]
     if any(c not in df.columns for c in need):
         raise ValueError(f"checkpoint {checkpoint}m was not extracted; available: {df.attrs.get('checkpoints')}")
-    out = df.copy()
+    out = df.copy().sort_values("open_time").reset_index(drop=True)
     out["yes_bid"], out["yes_ask"] = out[f"bid_{checkpoint}"], out[f"ask_{checkpoint}"]
     mid = (out["yes_bid"] + out["yes_ask"]) / 2
     if price_source == "trade":
@@ -431,6 +518,7 @@ def analysis_frame(df: pd.DataFrame, checkpoint: int, price_source: str = "trade
     else:
         raise ValueError("price_source must be trade, mid or executable")
     out["price_source"] = price_source
+    out = _add_fair_value(out, checkpoint, vol_scale, basis_adjust, df.attrs.get("m_adjust", 2 / 3))
     spot = out["spot_open"] if spot_ref == "open" else out[f"spot_{checkpoint}"]
     diff = out["strike"] - spot
     out["direction"] = np.select([diff > 0, diff < 0, diff == 0], ["upside", "downside", "at"], default="unknown")
