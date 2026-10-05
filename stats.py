@@ -20,10 +20,45 @@ ERA_DESC = {
 
 
 # --------------------------------------------------------------------------- eras
+# Era 1 = years <= end1, Era 2 = end1 < years <= end2, Era 3 = years > end2.
+# Defaults are the S&P 500 regimes; ``configure_eras`` re-points them for assets
+# with a shorter history (e.g. crypto). Both dicts are mutated in place so that
+# modules that imported them keep seeing the current values.
+ERA_CONFIG = {"end1": 1990, "end2": 2007}
+
+
+def configure_eras(
+    end1: int, end2: int, first_year: int, last_year: int, open_ended: bool = True
+) -> None:
+    """Set the era boundaries (inclusive end years) and refresh the display labels."""
+    if not (first_year <= end1 < end2 < last_year):
+        raise ValueError(
+            f"era end-years must satisfy {first_year} <= end1 < end2 < {last_year}; "
+            f"got {end1}, {end2}"
+        )
+    ERA_CONFIG.update(end1=end1, end2=end2)
+    ERA_DESC["Era 1"] = f"{first_year}-{end1}"
+    ERA_DESC["Era 2"] = f"{end1 + 1}-{end2}"
+    ERA_DESC["Era 3"] = f"{end2 + 1}-{'present' if open_ended else last_year}"
+
+
+def auto_era_bounds(index: pd.DatetimeIndex) -> tuple[int, int]:
+    """Split a history into three eras of roughly equal calendar length."""
+    years = pd.DatetimeIndex(index).year.to_numpy()
+    end1, end2 = (int(np.floor(q)) for q in np.quantile(years, [1 / 3, 2 / 3]))
+    if not (years.min() <= end1 < end2 < years.max()):
+        raise ValueError("history is too short to split into three eras; pass --era-years")
+    return end1, end2
+
+
 def assign_era(index: pd.DatetimeIndex) -> pd.Series:
     """Label each date with its market regime (by calendar year)."""
     years = pd.DatetimeIndex(index).year
-    labels = np.where(years <= 1990, "Era 1", np.where(years <= 2007, "Era 2", "Era 3"))
+    labels = np.where(
+        years <= ERA_CONFIG["end1"],
+        "Era 1",
+        np.where(years <= ERA_CONFIG["end2"], "Era 2", "Era 3"),
+    )
     return pd.Series(labels, index=index, name="era")
 
 

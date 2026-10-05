@@ -214,7 +214,36 @@ def print_expansion(exp: pd.DataFrame, target: int, control: int) -> None:
     )
 
 
-def print_notes(n_tests: int) -> None:
+def print_cross_asset(rows: Sequence[dict], target: int, control: int, horizon: int) -> None:
+    """One-line-per-asset roll-up (full sample, ``horizon``-day metrics)."""
+    table = []
+    for r in rows:
+        table.append(
+            [
+                r["ticker"],
+                r["span"],
+                f"{r['n_target']}/{r['n_control']}",
+                _pct(r["bounce_diff"]),
+                _p(r["bounce_p"]),
+                _spct(r["car_diff"]),
+                _p(r["car_p"]),
+                _p(r["did_car_p"]),
+            ]
+        )
+    print(
+        format_table(
+            [
+                "Asset", "History", "Events (tgt/ctl)", f"Bounce gap {horizon}d",
+                "Boot p", f"CAR gap {horizon}d", "Boot p", "Era3-Era1 CAR p",
+            ],
+            table,
+            f"CROSS-ASSET SUMMARY: {target}d minus {control}d, full sample "
+            "(positive gap = target reacts more; Boot = year-cluster bootstrap)",
+        )
+    )
+
+
+def print_notes(n_tests: int, ticker: str = "^GSPC", n_years: int = 99) -> None:
     print(
         "\nNotes:\n"
         "  * t / Welch / MWU p-values assume the two event samples are independent. They are not:\n"
@@ -225,7 +254,27 @@ def print_notes(n_tests: int) -> None:
         f"  * ~{n_tests} tests are reported with no multiple-comparison correction; expect a few\n"
         "    p<0.05 by chance alone. Treat isolated hits with suspicion.\n"
         "  * Bounce rates sit above 50% for support tests partly because of equity drift; only\n"
-        "    the target-minus-control differences speak to the S/R hypothesis.\n"
-        "  * ^GSPC before ~1962 has no true intraday High/Low (they equal Close), so ATR and\n"
-        "    touch detection in Era 1 are close-to-close approximations."
+        "    the target-minus-control differences speak to the S/R hypothesis.",
+        end="",
     )
+    if n_years < 20:
+        print(
+            f"\n  * WARNING: only {n_years} calendar years of history. Each era then has just a few\n"
+            "    year-clusters, so the cluster bootstrap and clustered OLS are unreliable and can\n"
+            "    report spuriously small p-values. Treat every result here as exploratory.",
+            end="",
+        )
+    if ticker == "^GSPC":
+        print(
+            "\n  * ^GSPC before ~1962 has no true intraday High/Low (they equal Close), so ATR and\n"
+            "    touch detection in Era 1 are close-to-close approximations.",
+            end="",
+        )
+    if ticker.upper().endswith(("-USD", "-USDT", "-EUR", "-BTC")):
+        print(
+            "\n  * This looks like a 24/7 market: every calendar day is a bar, so an N-day SMA\n"
+            "    spans N calendar days (a 200d SMA is ~29 weeks, not ~40) and 'trading days' in\n"
+            "    the horizons and de-clustering window are calendar days.",
+            end="",
+        )
+    print()

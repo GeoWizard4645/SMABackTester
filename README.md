@@ -182,6 +182,8 @@ pip install -r requirements.txt
 python main.py                                   # S&P 500 (^GSPC) from 1950, 200d vs 174d
 python main.py --control 150                     # a different control window
 python main.py --bootstrap 10000 --seed 7        # tighter bootstrap, different seed
+python main.py --ticker BTC-USD                  # Bitcoin
+python main.py --ticker BTC-USD ETH-USD AAPL NVDA  # several assets: one folder each + a roll-up table
 python main.py --ticker ^IXIC --start 1971-02-05 # another index
 python main.py --csv my_prices.csv               # your own OHLC data (first column = date)
 python main.py --synthetic                       # offline smoke test on a no-effect random walk
@@ -193,6 +195,8 @@ Downloads are cached in `.cache/` (open-ended requests are refreshed after 24 ho
 
 | Flag | Default | Meaning |
 |------|---------|---------|
+| `--ticker` | `^GSPC` | One or more Yahoo Finance symbols: indices, stocks, ETFs, crypto (`BTC-USD`, `ETH-USD`, ...) |
+| `--era-years END1 END2` | auto | Last year of Era 1 and Era 2 (see "Choosing eras" below) |
 | `--target` / `--control` | 200 / 174 | SMA windows (any integers) |
 | `--band` | 0.5 | Touch band half-width, in ATRs |
 | `--breach` | 1.5 | Bounce-failure distance, in ATRs |
@@ -204,12 +208,25 @@ Downloads are cached in `.cache/` (open-ended requests are refreshed after 24 ho
 | `--bootstrap` | 5000 | Bootstrap replications |
 | `--seed` | 42 | Random seed (results are reproducible) |
 | `--plot-horizon` | 5 | Horizon shown in `era_comparison.png` |
-| `--outdir` | `.` | Where PNGs are written |
+| `--outdir` | `.` | Where PNGs are written (one sub-folder per ticker when several are given) |
 | `--save-events` | off | Also write every event to `events.csv` |
 
 ### Output
 
 **Console** (six ASCII tables): (1) events per MA, era and direction; (2) bounce rates with 95% CIs; (3) mean CAR and standard deviation; (4) target-vs-control tests per era and horizon; (5) range expansion; (6) the Era 3 vs. Era 1 difference-in-differences.
+
+With several tickers, a final **cross-asset summary** lists, for each asset, the full-sample 200-minus-control gap in bounce rate and CAR (with bootstrap $p$-values) and the Era 3 vs. Era 1 difference-in-differences $p$-value.
+
+### Choosing eras
+
+The default eras (1950-1990, 1991-2007, 2008-present) describe the US equity market. They are used whenever the data starts in 1980 or earlier. For assets with a shorter history (Bitcoin starts in 2014, Ethereum in 2017) the history is instead **split into three eras of equal calendar length** and the chosen boundaries are printed at the top of each report. You can set them yourself, e.g. `--era-years 2019 2022`, which gives Era 1 = start-2019, Era 2 = 2020-2022, Era 3 = 2023-present.
+
+### Stocks, ETFs and crypto: what changes
+
+- **Any Yahoo Finance symbol works.** Prices are split/dividend-adjusted (`auto_adjust=True`), so high, low and close stay consistent.
+- **Crypto trades 24/7.** Every calendar day is a bar, so a 200-bar SMA spans 200 *calendar* days (about 29 weeks instead of about 40), and the horizons (1/3/5/10) and the 10-bar de-clustering window are calendar days too. The report prints a note when it detects a crypto ticker.
+- **The baseline adapts.** Abnormal returns subtract the unconditional mean return *of the same asset and era*, so a huge crypto bull-market drift is removed rather than counted as "support".
+- **Short histories are fragile.** Newer assets have few events and few calendar years per era, which makes the year-cluster bootstrap and clustered OLS unreliable (they can print spuriously small $p$-values). The report prints a warning for any asset with under 20 years of data.
 
 **Figures:**
 - `event_study_car.png`: average abnormal cumulative return from $t-5$ to $t+10$ around touches, 200-day vs. control.
@@ -238,5 +255,6 @@ Run `python main.py --synthetic` to see the same kind of null output.
 - **Old data quality.** `^GSPC` before about 1962 has no true intraday high/low (they equal the close), so ATR and touch detection in Era 1 are close-to-close approximations.
 - **Drift.** Bounce rates above 50% for support tests partly reflect equity drift. Only the 200-minus-control difference speaks to the hypothesis.
 - **Parameter choices.** Interpretations of "prior 5-day close above", the refractory rule and the breach test are documented in `events.py` and are configurable, but results can move with them.
-- **One market.** A single index over one history. A null here does not rule out effects in individual stocks or intraday data, and a positive result would not prove the *mechanism* is trader coordination.
+- **One asset at a time.** Each asset is tested separately. A null on one index does not rule out effects elsewhere, and a positive result would not prove the *mechanism* is trader coordination. When scanning many assets, the multiple-testing problem multiplies: out of 20 assets, one "significant" result is expected by chance.
+- **Short histories.** Crypto and recently listed stocks have few years per era; see "Stocks, ETFs and crypto" above.
 - **Not investment advice.** This is a research tool, not a trading strategy; it ignores costs, slippage and position sizing.
