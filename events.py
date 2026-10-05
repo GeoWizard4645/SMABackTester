@@ -24,6 +24,7 @@ class EventConfig:
     post: int = 10  # event-study window end (t+post)
     baseline_window: int = 20  # lookback for the range-expansion baseline
     breach_basis: str = "close"  # "close" or "low" (support) / "high" (resistance)
+    ma_type: str = "sma"  # "sma", "ema" or "wma"
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,7 @@ def detect_events(prices: pd.DataFrame, cfg: EventConfig, baselines: Baselines) 
       * cum_j    raw abnormal cumulative return from Close[t-pre] to Close[t+j]
                  (for event-study plots; apply ``sign`` to direction-adjust)
     """
-    f = add_indicators(prices, cfg.ma_window, cfg.atr_window, cfg.baseline_window)
+    f = add_indicators(prices, cfg.ma_window, cfg.atr_window, cfg.baseline_window, cfg.ma_type)
     close_s = f["Close"]
     close = close_s.to_numpy()
     sma = f["sma"].to_numpy()

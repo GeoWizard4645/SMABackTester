@@ -9,7 +9,10 @@ import pandas as pd
 
 from stats import ERA_ALL, ERA_DESC, ERA_ORDER
 
-ERAS = ERA_ORDER + [ERA_ALL]
+
+def _eras() -> list[str]:
+    """Current era names plus the pooled 'All' row (the scheme can change between assets)."""
+    return list(ERA_ORDER) + [ERA_ALL]
 
 
 def format_table(
@@ -80,7 +83,7 @@ def print_event_counts(counts: pd.DataFrame) -> None:
 def print_bounce_table(summary: pd.DataFrame, mas: Sequence[int], horizons: Sequence[int]) -> None:
     rows = []
     for ma in mas:
-        for era in ERAS:
+        for era in _eras():
             s = summary[(summary.ma == ma) & (summary.era == era)].set_index("horizon")
             row = [f"{ma}d SMA", _era_label(era)]
             for k in horizons:
@@ -102,7 +105,7 @@ def print_bounce_table(summary: pd.DataFrame, mas: Sequence[int], horizons: Sequ
 def print_car_table(summary: pd.DataFrame, mas: Sequence[int], horizons: Sequence[int]) -> None:
     rows = []
     for ma in mas:
-        for era in ERAS:
+        for era in _eras():
             s = summary[(summary.ma == ma) & (summary.era == era)].set_index("horizon")
             row = [f"{ma}d SMA", _era_label(era)]
             for k in horizons:
@@ -121,7 +124,7 @@ def print_car_table(summary: pd.DataFrame, mas: Sequence[int], horizons: Sequenc
 
 def print_comparison(comp: pd.DataFrame, target: int, control: int) -> None:
     rows = []
-    for era in ERAS:
+    for era in _eras():
         for metric, label in (("bounce", "bounce"), ("car", "CAR")):
             for r in comp[(comp.era == era) & (comp.metric == metric)].itertuples():
                 fmt = _pct if metric == "bounce" else _spct
@@ -156,7 +159,7 @@ def print_range_expansion(
     events: pd.DataFrame, comp: pd.DataFrame, mas: Sequence[int], target: int, control: int
 ) -> None:
     rows = []
-    for era in ERAS:
+    for era in _eras():
         c = comp[(comp.era == era) & (comp.metric == "tr_ratio")]
         p_txt = _p(c.mwu_p.iloc[0]) if len(c) else "n/a"
         for i, ma in enumerate(mas):
@@ -183,7 +186,15 @@ def print_range_expansion(
     )
 
 
-def print_expansion(exp: pd.DataFrame, target: int, control: int) -> None:
+def print_expansion(
+    exp: pd.DataFrame,
+    target: int,
+    control: int,
+    base_era: str | None = None,
+    late_era: str | None = None,
+) -> None:
+    base_era = base_era or ERA_ORDER[0]
+    late_era = late_era or ERA_ORDER[-1]
     rows = []
     for metric, label in (("bounce", "bounce"), ("car", "CAR")):
         fmt = _pct if metric == "bounce" else _spct
@@ -205,11 +216,12 @@ def print_expansion(exp: pd.DataFrame, target: int, control: int) -> None:
     print(
         format_table(
             [
-                "Metric", "Horizon", "Diff Era 1", "Diff Era 3", "Era3-Era1",
-                "Boot 95% CI", "Boot p", "OLS coef", "OLS p (clustered)",
+                "Metric", "Horizon", f"Diff {base_era}", f"Diff {late_era}",
+                f"{late_era}-{base_era}", "Boot 95% CI", "Boot p", "OLS coef", "OLS p (clustered)",
             ],
             rows,
-            f"6. HAS THE ({target}d - {control}d) GAP EXPANDED IN ERA 3 vs ERA 1?  (difference-in-differences)",
+            f"6. HAS THE ({target}d - {control}d) GAP EXPANDED IN {late_era.upper()} vs "
+            f"{base_era.upper()}?  (difference-in-differences)",
         )
     )
 
@@ -234,7 +246,7 @@ def print_cross_asset(rows: Sequence[dict], target: int, control: int, horizon: 
         format_table(
             [
                 "Asset", "History", "Events (tgt/ctl)", f"Bounce gap {horizon}d",
-                "Boot p", f"CAR gap {horizon}d", "Boot p", "Era3-Era1 CAR p",
+                "Boot p", f"CAR gap {horizon}d", "Boot p", "Late-vs-early CAR p",
             ],
             table,
             f"CROSS-ASSET SUMMARY: {target}d minus {control}d, full sample "

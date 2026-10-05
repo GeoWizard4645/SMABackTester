@@ -23,6 +23,7 @@ from plot import plot_era_comparison, plot_event_study
 from stats import (
     ERA_ALL,
     ERA_DESC,
+    ERA_ORDER,
     auto_era_bounds,
     compare,
     configure_eras,
@@ -31,7 +32,7 @@ from stats import (
     summarize,
 )
 
-DEFAULT_ERAS = (1990, 2007)
+DEFAULT_ERAS = [1990, 2007]
 # The default S&P-style eras need a reasonable pre-1991 history to be meaningful.
 DEFAULT_ERAS_MAX_FIRST_YEAR = 1980
 
@@ -68,8 +69,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     help="price used for the breach check (close, or low/high intraday)")
 
     st = p.add_argument_group("statistics & output")
-    st.add_argument("--era-years", type=int, nargs=2, metavar=("END1", "END2"), default=None,
-                    help="last year of Era 1 and of Era 2. Default: 1990 2007 when the data "
+    st.add_argument("--era-years", type=int, nargs="+", metavar="YEAR", default=None,
+                    help="last calendar year of each era except the final one, e.g. '1990 2007' "
+                    "gives three eras; any number is allowed. Default: 1990 2007 when the data "
                     "starts by 1980, otherwise the history is split into equal thirds")
     st.add_argument("--bootstrap", type=int, default=5000, help="bootstrap replications")
     st.add_argument("--seed", type=int, default=42)
@@ -109,19 +111,16 @@ def setup_eras(args: argparse.Namespace, prices: pd.DataFrame) -> str:
     """Choose era boundaries for this asset; returns a human-readable note."""
     first, last = prices.index[0].year, prices.index[-1].year
     if args.era_years:
-        end1, end2 = args.era_years
+        ends = args.era_years
         how = "user-specified"
     elif first <= DEFAULT_ERAS_MAX_FIRST_YEAR:
-        end1, end2 = DEFAULT_ERAS
+        ends = DEFAULT_ERAS
         how = "default regimes"
     else:
-        end1, end2 = auto_era_bounds(prices.index)
+        ends = auto_era_bounds(prices.index)
         how = "history split into equal thirds"
-    configure_eras(end1, end2, first, last, open_ended=args.end is None)
-    return (
-        f"Eras ({how}): Era 1 {ERA_DESC['Era 1']}, Era 2 {ERA_DESC['Era 2']}, "
-        f"Era 3 {ERA_DESC['Era 3']}"
-    )
+    configure_eras(ends, first, last, open_ended=args.end is None)
+    return f"Eras ({how}): " + ", ".join(f"{e} {ERA_DESC[e]}" for e in ERA_ORDER)
 
 
 def run_one(args: argparse.Namespace, ticker: str, outdir: Path) -> dict | None:

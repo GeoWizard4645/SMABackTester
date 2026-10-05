@@ -9,56 +9,68 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sst
 
-ERA_ORDER = ["Era 1", "Era 2", "Era 3"]
 ERA_ALL = "All"
-ERA_DESC = {
+# The era scheme is process-global state (an ordered list of names, display labels and
+# inclusive end-years). Both containers are mutated in place by ``configure_eras`` so
+# that modules which imported them keep seeing the current values. Callers that run
+# analyses concurrently (the web app) must serialise them.
+ERA_ORDER: list[str] = ["Era 1", "Era 2", "Era 3"]
+ERA_DESC: dict[str, str] = {
     "Era 1": "1950-1990",
     "Era 2": "1991-2007",
     "Era 3": "2008-present",
     ERA_ALL: "full sample",
 }
+ERA_CONFIG: dict[str, list[int]] = {"ends": [1990, 2007]}
 
 
 # --------------------------------------------------------------------------- eras
-# Era 1 = years <= end1, Era 2 = end1 < years <= end2, Era 3 = years > end2.
-# Defaults are the S&P 500 regimes; ``configure_eras`` re-points them for assets
-# with a shorter history (e.g. crypto). Both dicts are mutated in place so that
-# modules that imported them keep seeing the current values.
-ERA_CONFIG = {"end1": 1990, "end2": 2007}
-
-
 def configure_eras(
-    end1: int, end2: int, first_year: int, last_year: int, open_ended: bool = True
+    end_years: Sequence[int], first_year: int, last_year: int, open_ended: bool = True
 ) -> None:
-    """Set the era boundaries (inclusive end years) and refresh the display labels."""
-    if not (first_year <= end1 < end2 < last_year):
-        raise ValueError(
-            f"era end-years must satisfy {first_year} <= end1 < end2 < {last_year}; "
-            f"got {end1}, {end2}"
-        )
-    ERA_CONFIG.update(end1=end1, end2=end2)
-    ERA_DESC["Era 1"] = f"{first_year}-{end1}"
-    ERA_DESC["Era 2"] = f"{end1 + 1}-{end2}"
-    ERA_DESC["Era 3"] = f"{end2 + 1}-{'present' if open_ended else last_year}"
+    """Define N = len(end_years) + 1 eras by their inclusive last calendar years.
+
+    Era 1 is every year <= end_years[0]; Era k is end_years[k-2] < year <= end_years[k-1];
+    the final era is everything after end_years[-1]. Boundaries must be strictly
+    increasing. An era that falls outside the data is allowed (it just stays empty).
+    """
+    ends = [int(y) for y in end_years]
+    if not ends:
+        raise ValueError("at least one era boundary is required")
+    if any(b <= a for a, b in zip(ends, ends[1:])):
+        raise ValueError(f"era boundaries must be strictly increasing, got {ends}")
+    names = [f"Era {i + 1}" for i in range(len(ends) + 1)]
+    ERA_CONFIG["ends"] = ends
+    ERA_ORDER[:] = names
+    ERA_DESC.clear()
+    starts = [first_year] + [e + 1 for e in ends]
+    stops = ends + [last_year]
+    for i, name in enumerate(names):
+        lo, hi = max(starts[i], first_year), min(stops[i], last_year)
+        if i == len(names) - 1 and open_ended:
+            hi_txt = "present"
+        else:
+            hi_txt = str(hi)
+        ERA_DESC[name] = f"{lo}-{hi_txt}" if lo <= hi else "no data"
+    ERA_DESC[ERA_ALL] = "full sample"
 
 
-def auto_era_bounds(index: pd.DatetimeIndex) -> tuple[int, int]:
-    """Split a history into three eras of roughly equal calendar length."""
+def auto_era_bounds(index: pd.DatetimeIndex, n_eras: int = 3) -> list[int]:
+    """Split a history into ``n_eras`` eras of roughly equal calendar length."""
     years = pd.DatetimeIndex(index).year.to_numpy()
-    end1, end2 = (int(np.floor(q)) for q in np.quantile(years, [1 / 3, 2 / 3]))
-    if not (years.min() <= end1 < end2 < years.max()):
-        raise ValueError("history is too short to split into three eras; pass --era-years")
-    return end1, end2
+    qs = np.linspace(0, 1, n_eras + 1)[1:-1]
+    ends = [int(np.floor(q)) for q in np.quantile(years, qs)]
+    ok = all(b > a for a, b in zip(ends, ends[1:])) and years.min() <= ends[0] and ends[-1] < years.max()
+    if not ok:
+        raise ValueError(f"history is too short to split into {n_eras} eras; set the boundaries manually")
+    return ends
 
 
 def assign_era(index: pd.DatetimeIndex) -> pd.Series:
     """Label each date with its market regime (by calendar year)."""
-    years = pd.DatetimeIndex(index).year
-    labels = np.where(
-        years <= ERA_CONFIG["end1"],
-        "Era 1",
-        np.where(years <= ERA_CONFIG["end2"], "Era 2", "Era 3"),
-    )
+    years = pd.DatetimeIndex(index).year.to_numpy()
+    pos = np.searchsorted(np.asarray(ERA_CONFIG["ends"]), years, side="left")
+    labels = np.asarray(ERA_ORDER, dtype=object)[pos]
     return pd.Series(labels, index=index, name="era")
 
 
@@ -161,6 +173,9 @@ def _two_sample_tests(a: np.ndarray, b: np.ndarray) -> dict[str, float]:
     return out
 
 
+MIN_CLUSTERS = 5  # below this many distinct years the cluster bootstrap is meaningless
+
+
 def _cluster_diff_draws(
     years_a: np.ndarray,
     vals_a: np.ndarray,
@@ -175,10 +190,15 @@ def _cluster_diff_draws(
     given year together. This respects (i) serial dependence of events inside
     a year and (ii) the strong cross-MA dependence that arises because the 200d
     and control SMAs are tested against the same price path.
-    Returns (observed difference, array of bootstrap differences).
+    Returns (observed difference, array of bootstrap differences). With fewer than
+    ``MIN_CLUSTERS`` distinct years the draws are all NaN (no inference possible).
     """
     if len(vals_a) == 0 or len(vals_b) == 0:
         return np.nan, np.full(n_boot, np.nan)
+    if len(np.union1d(years_a, years_b)) < MIN_CLUSTERS:
+        # Too few clusters to resample: report the point estimate, but no CI / p-value.
+        obs = float(vals_a.mean() - vals_b.mean())
+        return obs, np.full(n_boot, np.nan)
     lo = int(min(years_a.min(), years_b.min()))
     hi = int(max(years_a.max(), years_b.max()))
     g = hi - lo + 1
@@ -292,8 +312,8 @@ def did_regression(
     target: int,
     control: int,
     col: str,
-    base_era: str = "Era 1",
-    late_era: str = "Era 3",
+    base_era: str | None = None,
+    late_era: str | None = None,
 ) -> tuple[float, float, float]:
     """Difference-in-differences coefficient from a pooled interaction regression.
 
@@ -303,6 +323,8 @@ def did_regression(
     reactivity between ``base_era`` and ``late_era``. SEs are clustered by
     calendar year. Returns (coefficient, se, p-value).
     """
+    base_era = base_era or ERA_ORDER[0]
+    late_era = late_era or ERA_ORDER[-1]
     sub = events[events["ma"].isin([target, control])][["ma", "era", "year", col]].dropna()
     if (sub["era"] == base_era).sum() == 0 or (sub["era"] == late_era).sum() == 0:
         return (np.nan, np.nan, np.nan)
@@ -333,8 +355,8 @@ def era_expansion(
     horizons: Sequence[int],
     n_boot: int = 5000,
     seed: int = 0,
-    base_era: str = "Era 1",
-    late_era: str = "Era 3",
+    base_era: str | None = None,
+    late_era: str | None = None,
 ) -> pd.DataFrame:
     """Did (Metric_target - Metric_control) grow from ``base_era`` to ``late_era``?
 
@@ -342,6 +364,8 @@ def era_expansion(
     (years resampled independently within each era) and the clustered
     interaction regression.
     """
+    base_era = base_era or ERA_ORDER[0]
+    late_era = late_era or ERA_ORDER[-1]
     rng = np.random.default_rng(seed + 1)
     rows = []
     for name, col, k in _metric_specs(horizons):
