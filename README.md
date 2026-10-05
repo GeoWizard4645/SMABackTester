@@ -75,64 +75,48 @@ pytest -q tests
 
 ## 3. Deploying to Cloudflare
 
-The site is **one HTML file + one Cloudflare Worker (the data proxy)**.
+The site is **one HTML file served by a Cloudflare Worker that also answers the data proxy**. It deploys from the repo root with a single command, and the same command is what Cloudflare runs when the GitHub repo is connected ("Workers Builds").
 
-### Step 1 — build
+```
+wrangler.toml          <- Worker "smabacktester": serves ./public, runs cloudflare/worker.js for /api/proxy/*
+public/index.html      <- THE WEBSITE: styles, scripts, Python sources, maths page and a saved Kalshi run, all in one file (committed)
+cloudflare/worker.js   <- the data proxy (Yahoo, Kalshi, Coinbase)
+```
+
+### Updating the site
 
 ```bash
-python build_static.py
+python build_static.py        # rebuilds public/index.html (needs Node.js; recomputes the saved Kalshi run, ~30 s)
+git add -A && git commit -m "Update site" && git push
 ```
 
-This needs Node (it bundles the JavaScript with esbuild) and produces:
+Pushing is enough when Workers Builds is connected: it clones the repo and runs `npx wrangler deploy`, which uploads `public/` and the Worker. No build command is needed because `public/index.html` is already built and committed. To deploy by hand instead: `npx wrangler login` once, then `npx wrangler deploy`.
 
-```
-dist/
-  index.html      <- THE WEBSITE: styles, scripts, Python sources and the maths page are all inside this one file
-  cloudflare/     <- worker.js, wrangler.toml, test_worker.mjs (the data proxy)
-  functions/      <- the same proxy as a Cloudflare Pages Function (alternative to the Worker)
-```
+Build options: `--reuse-snapshot` (reuse the previous saved Kalshi run: fast, works offline), `--no-snapshot` (no saved run), `--snapshot-days 30`.
 
-Because everything is inside `index.html`, publishing that single file is enough — there is nothing else to forget to upload. (An earlier version was split into `static/` and `py/` folders; when only `index.html` was uploaded the page showed up unstyled and empty. `python build_static.py --multi` still writes that multi-file layout to `dist/site/` if you want it.)
+### If the Cloudflare build fails
 
-Rehearse production locally (serves **only** `dist/index.html`, 404 for everything else, plus the proxy):
+* **"Could not detect a directory containing static files"**: wrangler found no `wrangler.toml` with an `[assets]` section at the repo root, or `public/` is missing or empty. Make sure `wrangler.toml` and `public/index.html` are committed (`public/` must not be in `.gitignore`).
+* **Worker name mismatch**: the `name` in `wrangler.toml` (`smabacktester`) must match the Worker in the Cloudflare dashboard, otherwise a second Worker is created.
+* **Custom domain**: add it once in the dashboard under *Workers & Pages, smabacktester, Settings, Domains & Routes* (for example `financetests.vivaanshahani.com`). `wrangler deploy` leaves it alone.
+* The build log also shows Python packages being installed. That is Cloudflare detecting `requirements.txt`; it is harmless, only slow.
+
+### Test it before you push
 
 ```bash
-python serve_dist.py        # http://127.0.0.1:5001/   (add --prefix /FinanceProjectTests to test a sub-path)
+npx wrangler deploy --dry-run     # validates the config without uploading
+npx wrangler dev                  # serves the page and the proxy at http://localhost:8787
+node cloudflare/test_worker.mjs   # 11 checks of the proxy rules against the live APIs
+python serve_dist.py              # serves only public/index.html + the proxy, the way production behaves
 ```
-
-### Step 2 — publish the page
-
-Put `dist/index.html` at the root of the site served at `financetests.vivaanshahani.com` (for a Cloudflare Pages project: make it the only file in the build output, or the `index.html` in the published folder) and deploy as usual. The page also works under a sub-path such as `/FinanceProjectTests/`; a missing trailing slash is redirected for you.
-
-### Step 3 — deploy the proxy (pick **one**)
-
-**A. Cloudflare Worker (recommended)**
-
-```bash
-cd dist/cloudflare            # or ./cloudflare in the repo
-npx wrangler login
-npx wrangler deploy
-```
-
-`wrangler.toml` binds the Worker to `financetests.vivaanshahani.com/api/proxy/*` and `vivaanshahani.com/FinanceProjectTests/api/proxy/*` (delete the one you do not use). The Worker only looks for the `/api/proxy/` marker in the path, so it works under any hostname or prefix.
-
-**B. Cloudflare Pages Function** — if the site is a Pages project, copy `dist/functions/` into the project root (next to the files Pages publishes). It serves `/api/proxy/*` from the same code.
-
-### Step 4 — verify
-
-1. `https://financetests.vivaanshahani.com/api/proxy/yahoo?symbol=AAPL&period1=1700000000&period2=1790000000` should return JSON (not a 404 page).
-2. Open the site and press **Run**. The first visit downloads the Python runtime (~30 MB from the jsDelivr CDN; cached afterwards).
-3. `node cloudflare/test_worker.mjs` checks the proxy logic against the live APIs (11 checks).
-4. Switch to **Kalshi 15-minute test** and run it with *Real data only*.
 
 ### Things to know
 
-* **If the page looks unstyled or its inputs are empty**, the HTML was served without its scripts, or the proxy is missing: check the browser console and the URL in step 4.1.
 * **Upstream blocking and rate limits are the main risk.** Yahoo and Kalshi may treat Cloudflare's IP ranges differently from a laptop, and Kalshi answers HTTP 429 to bursts of requests, so the Kalshi study paces its requests (about 3 per second) and backs off when throttled (a 7-day pull takes ~30 s). If Yahoo blocks you, use "upload your own CSV"; the Kalshi tool's default *real data (else simulated)* falls back to a clearly labelled synthetic dataset instead of failing.
 * **Content-Security-Policy.** If the site sets a CSP it must allow `cdn.jsdelivr.net` and `cdn.plot.ly` for scripts, `connect-src` to `cdn.jsdelivr.net`, `worker-src blob:`, and `script-src 'wasm-unsafe-eval'` (WebAssembly).
 * **Third-party CDNs** are used for Plotly, KaTeX and Pyodide. Pin or self-host them if you need offline or locked-down operation.
 * **Caching.** The Worker caches successful responses (Yahoo 1 h, Kalshi 60 s, Coinbase 5 min) and never caches errors.
-* **Updating.** Re-run `python build_static.py` and re-publish `dist/index.html`; the Worker only changes if `cloudflare/worker.js` does.
+* **First visit** downloads the Python runtime (~30 MB from jsDelivr; cached afterwards).
 
 ---
 
@@ -342,8 +326,9 @@ Data source (live / auto / synthetic), the fair-value benchmark's volatility win
 | `appmeta.py` | Ticker presets, list of Python files for the browser, proxy allowlist |
 | `kalshi_lab/` | `kalshi_data.py`, `calibration.py`, `backtest.py`, `stats.py`, `plot.py`, `main.py` (CLI), `web.py` (browser entry points + console), `requirements.txt` |
 | `static/` | Page source: `index.html`, `style.css`, `method.html`, `js/` (`main`, `kalshi`, `controls`, `charts`, `tables`, `engine`, `pyworker`, `util`). `build_static.py` inlines all of it into one file |
-| `cloudflare/` | `worker.js` (data proxy), `wrangler.toml`, `test_worker.mjs` |
-| `build_static.py`, `serve_dist.py` | Build the single-file site (`dist/index.html`); rehearse production locally |
+| `cloudflare/` | `worker.js` (data proxy), `test_worker.mjs` |
+| `wrangler.toml`, `public/` | Cloudflare deployment: the Worker config, and the built single-file site (committed) |
+| `build_static.py`, `serve_dist.py` | Build `public/index.html`; rehearse production locally |
 | `tests/` | 34 pytest tests (indicators, events, statistics, fees, backtest arithmetic, API validation, end-to-end) |
 
 ---

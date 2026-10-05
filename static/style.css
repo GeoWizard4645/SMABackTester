@@ -240,3 +240,18 @@ textarea.code { width: 100%; font: 13.5px/1.5 var(--mono); padding: 10px 12px; b
   .form-grid, .form-grid.four { grid-template-columns: 1fr; }
   .f.span2 { grid-column: auto; }
 }
+
+/* ---------- "Run it yourself" page ---------- */
+.doc { max-width: 760px; }
+.doc h2 { font-size: 22px; margin-bottom: 8px; }
+.doc h3 { font: 700 15px var(--sans); margin: 26px 0 6px; }
+.doc ul { padding-left: 22px; }
+.doc li { margin: 3px 0; }
+.doc .doc-links { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 6px; }
+.doc .doc-links .btn { text-decoration: none; display: inline-flex; align-items: center; }
+.codeblock { position: relative; margin: 8px 0 10px; }
+.codeblock pre { margin: 0; padding: 12px 14px; background: #fff; border: 1px solid var(--ink-3); overflow-x: auto; font: 13px/1.5 var(--mono); }
+.codeblock code { font: inherit; }
+.copybtn { position: absolute; top: 6px; right: 6px; font: 12px var(--sans); padding: 1px 9px; border: 1px solid var(--ink-3); background: var(--bg); cursor: pointer; }
+.copybtn:hover { background: var(--surface-2); border-color: var(--ink); }
+#view-local[hidden] { display: none; }

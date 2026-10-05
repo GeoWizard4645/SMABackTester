@@ -1,0 +1,17 @@
+# Cloudflare Worker + static site, deployed from the repo root with:  npx wrangler deploy
+# (this is also what Cloudflare "Workers Builds" runs when the GitHub repo is connected).
+#
+#   public/index.html      the whole website (built by `python build_static.py`, committed to git)
+#   cloudflare/worker.js   the data proxy answering /api/proxy/*  (Yahoo, Kalshi, Coinbase)
+#
+# Requests to /api/proxy/* run the Worker; everything else is served straight from public/.
+# The custom domain (e.g. financetests.vivaanshahani.com) is attached in the dashboard under
+# Settings > Domains & Routes and is left alone by `wrangler deploy`.
+name = "smabacktester"
+main = "cloudflare/worker.js"
+compatibility_date = "2025-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/proxy/*"]

@@ -10,7 +10,7 @@
 //
 // The page asks for "api/proxy/..." relative to wherever it is hosted, so the worker only looks for the
 // "/api/proxy/" marker: it works at https://financetests.vivaanshahani.com/api/proxy/... and equally at
-// https://vivaanshahani.com/FinanceProjectTests/api/proxy/... Routes are set in wrangler.toml.
+// https://vivaanshahani.com/FinanceProjectTests/api/proxy/... See ../wrangler.toml for how it is deployed.
 
 const MARK = "/api/proxy/";
 
@@ -87,4 +87,10 @@ export async function handle(request, ctx) {
   return forward(`${UPSTREAMS[name]}/${path}${url.search}`, ttl, ctx);
 }
 
-export default { fetch: (request, env, ctx) => handle(request, ctx) };
+export default {
+  fetch(request, env, ctx) {
+    // Safety net: if the platform ever routes a non-proxy request here, hand it to the static assets.
+    if (env && env.ASSETS && !new URL(request.url).pathname.includes("/api/proxy/")) return env.ASSETS.fetch(request);
+    return handle(request, ctx);
+  },
+};

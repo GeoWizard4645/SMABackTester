@@ -1,4 +1,4 @@
-"""Rehearse production: serve ONLY dist/index.html plus the data proxy.
+"""Rehearse production: serve ONLY public/index.html plus the data proxy.
 
 Any other file (static/, py/, ...) answers 404 and there is no /api/analyze, so this proves the single-file
 build works on its own and runs the analysis with in-browser Python, exactly like Cloudflare will.
@@ -16,7 +16,7 @@ from flask import Flask, abort, redirect, send_from_directory
 
 import app as dev_app
 
-DIST = Path(__file__).resolve().parent / "dist"
+DIST = Path(__file__).resolve().parent / "public"
 
 
 def make_app(prefix: str) -> Flask:

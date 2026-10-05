@@ -1,13 +1,13 @@
 """Build the website.
 
-    python build_static.py              # -> dist/index.html   (ONE self-contained file) + dist/cloudflare/
+    python build_static.py              # -> public/index.html   (ONE self-contained file; commit it)
     python build_static.py --no-snapshot  # skip the saved live Kalshi run (offline / faster)
 
-`dist/index.html` has the styles, the JavaScript, the Python sources and the maths page inlined, so
+`public/index.html` has the styles, the JavaScript, the Python sources and the maths page inlined, so
 publishing that single file is enough: nothing can be left behind. It needs only the data proxy
-(cloudflare/worker.js) at  <site>/api/proxy/...  and the public CDNs for Plotly, KaTeX and Pyodide.
+(cloudflare/worker.js, deployed with the repo-root wrangler.toml) at  <site>/api/proxy/...  and the public CDNs for Plotly, KaTeX and Pyodide.
 
-    python build_static.py --multi      # also write the multi-file layout to dist/site/
+    python build_static.py --multi      # also write the multi-file layout to dist/site/ (not needed for Cloudflare)
 
 Bundling the JavaScript needs Node (npx esbuild). Without Node, use --multi.
 """
@@ -103,17 +103,6 @@ def build_single(out: Path, snapshot: dict | None = None) -> Path:
     return dest
 
 
-def build_extras(out: Path) -> None:
-    """Cloudflare worker (+ the same proxy as a Pages Function)."""
-    shutil.copytree(ROOT / "cloudflare", out / "cloudflare", dirs_exist_ok=True)
-    fn_dir = out / "functions" / "api" / "proxy"
-    fn_dir.mkdir(parents=True, exist_ok=True)
-    (fn_dir / "_proxy.js").write_text((ROOT / "cloudflare/worker.js").read_text(encoding="utf-8"), encoding="utf-8")
-    (fn_dir / "[[path]].js").write_text(
-        'import { handle } from "./_proxy.js";\n\nexport const onRequest = ({ request, waitUntil }) => handle(request, { waitUntil });\n',
-        encoding="utf-8")
-
-
 def build_multi(out: Path) -> Path:
     site = out / "site"
     if site.exists():
@@ -134,8 +123,8 @@ def build_multi(out: Path) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default="dist")
-    ap.add_argument("--multi", action="store_true", help="also write the multi-file layout to <out>/site/")
+    ap.add_argument("--out", default="public", help="folder Cloudflare serves (wrangler.toml points at ./public)")
+    ap.add_argument("--multi", action="store_true", help="also write the multi-file layout to dist/site/")
     ap.add_argument("--meta-only", action="store_true", help="only refresh static/meta.json (local Flask server)")
     ap.add_argument("--no-snapshot", action="store_true", help="skip the saved live Kalshi run (faster, works offline)")
     ap.add_argument("--snapshot-days", type=float, default=14, help="days of live data in the saved Kalshi run")
@@ -146,10 +135,9 @@ def main() -> None:
         print("wrote static/meta.json")
         return
     out = Path(args.out)
-    if out.exists():
-        for stale in ("index.html", "cloudflare", "functions", "FinanceProjectTests"):
-            p = out / stale
-            shutil.rmtree(p) if p.is_dir() else p.unlink(missing_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+    for stale in ("cloudflare", "functions", "FinanceProjectTests"):  # leftovers from older builds
+        shutil.rmtree(out / stale, ignore_errors=True)
     snap_file = ROOT / "static/kalshi_snapshot.json"  # lets the local Flask server show the same saved run
     if args.reuse_snapshot and snap_file.exists():
         snapshot = json.loads(snap_file.read_text(encoding="utf-8"))
@@ -160,10 +148,9 @@ def main() -> None:
     else:
         snap_file.unlink(missing_ok=True)
     page = build_single(out, snapshot)
-    build_extras(out)
     print(f"built {page}  ({page.stat().st_size / 1024:.0f} KB, single file, saved Kalshi run: {'yes' if snapshot else 'no'})")
     if args.multi:
-        print(f"built {build_multi(out)}  (multi-file layout)")
+        print(f"built {build_multi(Path('dist'))}  (multi-file layout)")
 
 
 if __name__ == "__main__":

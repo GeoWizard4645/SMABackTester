@@ -30,7 +30,8 @@ async function boot() {
   restoreConfig();
   wireChrome();
   renderTab();
-  if (new URLSearchParams(location.search).get('view') === 'kalshi') switchView('kalshi');
+  const wanted = new URLSearchParams(location.search).get('view');
+  if (wanted === 'kalshi' || wanted === 'local') switchView(wanted);
   if (typeof Plotly === 'undefined') setStatus('Plotly failed to load (offline?). Charts need an internet connection for the CDN scripts.', 'err');
 }
 
@@ -49,9 +50,10 @@ let kalshiLoaded = false;
 async function switchView(view) {
   $('#view-sma').hidden = view !== 'sma';
   $('#view-kalshi').hidden = view !== 'kalshi';
+  $('#view-local').hidden = view !== 'local';
   $$('#viewnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   const url = new URL(location.href);
-  if (view === 'kalshi') url.searchParams.set('view', 'kalshi'); else url.searchParams.delete('view');
+  if (view !== 'sma') url.searchParams.set('view', view); else url.searchParams.delete('view');
   history.replaceState(null, '', url);
   if (view === 'kalshi' && !kalshiLoaded) {
     kalshiLoaded = true;
@@ -63,7 +65,26 @@ async function switchView(view) {
   window.dispatchEvent(new Event('resize'));
 }
 
+function wireCopyButtons() {
+  $$('.copybtn').forEach((btn) => btn.addEventListener('click', async () => {
+    const text = btn.nextElementSibling.innerText.replace(/\n$/, '');
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch { /* fall back below */ }
+    if (!ok) { // older browsers / blocked clipboard API
+      const box = h('textarea', { style: 'position:fixed;opacity:0' });
+      box.value = text;
+      document.body.append(box);
+      box.select();
+      try { ok = document.execCommand('copy'); } catch { /* ignore */ }
+      box.remove();
+    }
+    btn.textContent = ok ? 'Copied' : 'Select and copy';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+  }));
+}
+
 function wireChrome() {
+  wireCopyButtons();
   $('#viewnav').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) switchView(b.dataset.view); });
   engine.onStatus((t) => {
     const el = $('#py-status');

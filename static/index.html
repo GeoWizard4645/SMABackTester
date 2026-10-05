@@ -17,6 +17,7 @@
   <nav class="viewnav" id="viewnav" aria-label="Choose a lab">
     <button type="button" data-view="sma" class="active">Moving average</button>
     <button type="button" data-view="kalshi">Kalshi 15-minute</button>
+    <button type="button" data-view="local">Run it yourself</button>
   </nav>
   <span class="pystatus" id="py-status" hidden></span>
 </header>
@@ -183,6 +184,85 @@
 </div>
 </div>
 <div id="view-kalshi" hidden></div>
+<div id="view-local" hidden>
+<div class="page doc">
+  <h2>Run it on your own computer</h2>
+  <p>Everything on this site is open source. Running it locally is faster (the moving-average test takes a second or two instead of about 30, and there is no 30 MB download), and it lets you change the code, the settings or the data.</p>
+  <p class="doc-links">
+    <a class="btn primary" href="https://github.com/geowizard4645/SMABackTester" target="_blank" rel="noopener">View the code on GitHub</a>
+    <a class="btn" href="https://github.com/geowizard4645/SMABackTester/archive/refs/heads/main.zip">Download as a ZIP</a>
+  </p>
+
+  <h3>1. What you need</h3>
+  <ul>
+    <li><a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python 3.10 or newer</a> (check with <code>python3 --version</code>).</li>
+    <li><a href="https://git-scm.com/downloads" target="_blank" rel="noopener">Git</a>, or just use the ZIP button above and unzip it.</li>
+    <li>An internet connection, because prices come from Yahoo Finance, Kalshi and Coinbase. Node.js is only needed if you want to rebuild the website file.</li>
+  </ul>
+
+  <h3>2. Get the code</h3>
+  <div class="codeblock"><button class="copybtn" type="button">Copy</button><pre><code>git clone https://github.com/geowizard4645/SMABackTester.git
+cd SMABackTester</code></pre></div>
+
+  <h3>3. Set up Python (once)</h3>
+  <p>This makes a private folder for the libraries, so nothing else on your computer is touched.</p>
+  <div class="codeblock"><button class="copybtn" type="button">Copy</button><pre><code>python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt</code></pre></div>
+  <p class="note">On Windows use <code>py -m venv .venv</code> and <code>.venv\Scripts\activate</code> instead of the first two lines. Next time you only need the <code>activate</code> line.</p>
+
+  <h3>4. Start the website</h3>
+  <div class="codeblock"><button class="copybtn" type="button">Copy</button><pre><code>python app.py</code></pre></div>
+  <p>Open <a href="http://127.0.0.1:5050" target="_blank" rel="noopener">http://127.0.0.1:5050</a>. It is this same page, but the moving-average test now runs in native Python on your machine. Press Ctrl+C in the terminal to stop it.</p>
+
+  <h3>5. Or skip the website and use the command line</h3>
+  <p>Each test also works as a plain script that prints tables and saves PNG charts.</p>
+  <div class="codeblock"><button class="copybtn" type="button">Copy</button><pre><code># moving-average test: S&amp;P 500, 200-day vs 174-day
+python main.py
+python main.py --ticker BTC-USD ETH-USD AAPL        # several assets
+python main.py --target 50 --control 40             # test a different line
+python main.py --era-years 1970 1990 2010           # your own time periods
+
+# Kalshi 15-minute test
+python kalshi_lab/main.py --entry-checkpoint 5m --min-price 20 --max-price 50
+python kalshi_lab/main.py --source synthetic --bias 0   # a fair simulated market
+python kalshi_lab/main.py --series KXETH15M --days 14
+
+# run the tests
+pytest -q tests</code></pre></div>
+  <p class="note">Add <code>--help</code> to any command to see every option.</p>
+
+  <h3>6. Changing things</h3>
+  <table class="dt">
+    <thead><tr><th>To change</th><th>Edit</th></tr></thead>
+    <tbody>
+      <tr><td>What counts as a touch, how bounces are scored</td><td><code>events.py</code></td></tr>
+      <tr><td>Moving averages, volatility (ATR)</td><td><code>metrics.py</code></td></tr>
+      <tr><td>Statistical tests, eras, bootstrap</td><td><code>stats.py</code></td></tr>
+      <tr><td>Kalshi data, the fair-value benchmark</td><td><code>kalshi_lab/kalshi_data.py</code></td></tr>
+      <tr><td>Kalshi strategies and fees</td><td><code>kalshi_lab/backtest.py</code></td></tr>
+      <tr><td>How the page looks</td><td><code>static/style.css</code>, <code>static/index.html</code></td></tr>
+    </tbody>
+  </table>
+  <p>After editing the page files (anything in <code>static/</code>), restart <code>python app.py</code> and refresh the browser.</p>
+
+  <h3>7. Publish your own copy</h3>
+  <p>The live site is one file, <code>public/index.html</code>, plus a small Cloudflare Worker that fetches prices. To rebuild and publish it:</p>
+  <div class="codeblock"><button class="copybtn" type="button">Copy</button><pre><code>python build_static.py          # rebuilds public/index.html (needs Node.js)
+git add -A &amp;&amp; git commit -m "Update site" &amp;&amp; git push
+npx wrangler deploy             # or connect the GitHub repo in Cloudflare</code></pre></div>
+  <p>The README on GitHub has the full deployment notes.</p>
+
+  <h3>If something goes wrong</h3>
+  <ul>
+    <li><b>"Address already in use"</b>: another program has port 5050. Run <code>python app.py --port 8000</code> and open that port instead.</li>
+    <li><b>No data for a symbol</b>: Yahoo sometimes rate-limits. Wait a minute and retry, check the symbol, or upload your own CSV on the Moving average page.</li>
+    <li><b>Kalshi data will not load</b>: Kalshi limits how fast it answers, so large pulls take a minute. Choose "Simulated data" to try the tool with no network.</li>
+    <li><b><code>pip</code> or <code>python3</code> not found</b>: try <code>python -m pip install -r requirements.txt</code>, or <code>py</code> on Windows.</li>
+  </ul>
+</div>
+</div>
+
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
