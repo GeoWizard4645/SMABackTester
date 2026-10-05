@@ -250,6 +250,10 @@ def _sig(arr: np.ndarray, digits: int = 6) -> list:
 def load_asset(cfg: dict, ticker: str) -> pd.DataFrame:
     if ticker == SYNTHETIC:
         return data.generate_synthetic(cfg["start"], cfg["end"], seed=cfg["seed"])
+    if ticker in data.UPLOADS:
+        df = data.UPLOADS[ticker]
+        df = df[df.index >= pd.Timestamp(cfg["start"])]
+        return df[df.index <= pd.Timestamp(cfg["end"])] if cfg["end"] else df
     try:
         return data.load_prices(ticker, cfg["start"], cfg["end"], CACHE_DIR)
     except Exception as exc:  # network, unknown symbol, ...

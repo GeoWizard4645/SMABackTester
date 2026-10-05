@@ -56,11 +56,12 @@ def configure_eras(
 
 
 def auto_era_bounds(index: pd.DatetimeIndex, n_eras: int = 3) -> list[int]:
-    """Split a history into ``n_eras`` eras of roughly equal calendar length."""
-    years = pd.DatetimeIndex(index).year.to_numpy()
-    qs = np.linspace(0, 1, n_eras + 1)[1:-1]
-    ends = [int(np.floor(q)) for q in np.quantile(years, qs)]
-    ok = all(b > a for a, b in zip(ends, ends[1:])) and years.min() <= ends[0] and ends[-1] < years.max()
+    """Split a history into ``n_eras`` eras of (nearly) equal length in calendar years."""
+    years = pd.DatetimeIndex(index).year
+    first, last = int(years.min()), int(years.max())
+    span = last - first + 1
+    ends = [first + (span * k) // n_eras - 1 for k in range(1, n_eras)]
+    ok = all(b > a for a, b in zip(ends, ends[1:])) and first <= ends[0] and ends[-1] < last
     if not ok:
         raise ValueError(f"history is too short to split into {n_eras} eras; set the boundaries manually")
     return ends

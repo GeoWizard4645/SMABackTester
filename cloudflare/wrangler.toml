@@ -1,0 +1,9 @@
+# Deploy:  cd cloudflare && npx wrangler deploy
+# The zone (vivaanshahani.com) must be on your Cloudflare account.
+name = "finance-project-tests-proxy"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+routes = [
+  { pattern = "vivaanshahani.com/FinanceProjectTests/api/proxy/*", zone_name = "vivaanshahani.com" },
+]

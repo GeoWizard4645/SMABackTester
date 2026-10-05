@@ -1,7 +1,8 @@
 // SMA Lab front-end: wires the sidebar, runs analyses and renders every tab.
 
-import { $, $$, h, clear, api, fmt, sigClass, stars, download, toCSV, seriesColor, isDark } from './util.js';
-import { initControls, collectConfig, applyConfig, setStatus } from './controls.js';
+import { $, $$, h, clear, fmt, sigClass, stars, download, toCSV, seriesColor, isDark } from './util.js';
+import * as engine from './engine.js';
+import { initControls, collectConfig, applyConfig, setStatus, addTicker } from './controls.js';
 import * as charts from './charts.js';
 import { dataTable, tableBlock, verdict, gapPills, scoreboard, seriesDot } from './tables.js';
 
@@ -20,7 +21,7 @@ const era = (res, name) => (name === 'All' ? 'All' : `${name} (${res.eras.find((
 async function boot() {
   initTheme();
   try {
-    state.meta = await api('/api/meta');
+    state.meta = await (await fetch('static/meta.json')).json();
   } catch (e) {
     $('#tab-overview').append(h('div', { class: 'empty' }, h('h2', {}, 'Cannot reach the server'), h('p', {}, String(e.message))));
     return;
@@ -29,6 +30,7 @@ async function boot() {
   restoreConfig();
   wireChrome();
   renderTab();
+  if (new URLSearchParams(location.search).get('view') === 'kalshi') switchView('kalshi');
   if (typeof Plotly === 'undefined') setStatus('Plotly failed to load (offline?). Charts need an internet connection for the CDN scripts.', 'err');
 }
 
@@ -49,10 +51,50 @@ function initTheme() {
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem('smalab.theme', next); } catch { /* private mode */ }
     renderTab();
+    window.dispatchEvent(new Event('themechange'));
   });
 }
 
+let kalshiLoaded = false;
+async function switchView(view) {
+  $('#view-sma').hidden = view !== 'sma';
+  $('#view-kalshi').hidden = view !== 'kalshi';
+  $$('#viewnav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  $('.tagline').textContent = view === 'kalshi' ? 'Do retail traders overprice “Yes” on Kalshi’s 15-minute crypto contracts?' : 'Is the 200-day moving average really a support/resistance level?';
+  const url = new URL(location.href);
+  if (view === 'kalshi') url.searchParams.set('view', 'kalshi'); else url.searchParams.delete('view');
+  history.replaceState(null, '', url);
+  if (view === 'kalshi' && !kalshiLoaded) {
+    kalshiLoaded = true;
+    try {
+      const mod = await import('./kalshi.js');
+      mod.initKalshi($('#view-kalshi'), state.meta.kalshi);
+    } catch (e) { kalshiLoaded = false; $('#view-kalshi').textContent = `Could not load the Kalshi lab: ${e.message}`; }
+  }
+  window.dispatchEvent(new Event('resize'));
+}
+
 function wireChrome() {
+  $('#viewnav').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) switchView(b.dataset.view); });
+  engine.onStatus((t) => {
+    const el = $('#py-status');
+    el.hidden = false;
+    el.textContent = t;
+    clearTimeout(el._t);
+    if (t === 'Python ready.') el._t = setTimeout(() => { el.hidden = true; }, 3000);
+  });
+  $('#csv-upload').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > 8e6) { setStatus('That file is larger than 8 MB.', 'err'); return; }
+    setStatus(`Reading ${f.name}…`, 'busy');
+    try {
+      const r = await engine.call('register_csv', { name: f.name, text: await f.text() });
+      addTicker(r.ticker);
+      setStatus(`Loaded ${f.name} as ${r.ticker}. Add it to a run with “Run analysis”.`);
+    } catch (err) { setStatus(err.message, 'err'); }
+  });
   $('#run-btn').addEventListener('click', runAnalysis);
   document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') runAnalysis(); });
   $('#reset-btn').addEventListener('click', () => { applyConfig(state.meta.defaults); history.replaceState(null, '', location.pathname); setStatus('Settings reset to defaults.'); });
@@ -85,7 +127,7 @@ async function runAnalysis() {
   const t0 = performance.now();
   setStatus(`Analysing ${cfg.tickers.length} asset${cfg.tickers.length > 1 ? 's' : ''}… (first run per asset downloads its history)`, 'busy');
   try {
-    const resp = await api('/api/analyze', { config: cfg });
+    const resp = await engine.call('analyze', { config: cfg }, { onProgress: (t) => setStatus(t, 'busy') });
     try { localStorage.setItem(STORE, JSON.stringify(cfg)); } catch { /* ignore */ }
     if (!resp.results.length) {
       state.resp = null;
@@ -309,7 +351,7 @@ async function runScan() {
   btn.disabled = true;
   clear(out).append(h('div', { class: 'block' }, h('span', { class: 'spinner' }), 'Scanning line lengths…'));
   try {
-    state.scan = await api('/api/scan', { config: collectConfig(), ticker: o.ticker, min: o.min, max: o.max, step: o.step });
+    state.scan = await engine.call('scan', { config: collectConfig(), ticker: o.ticker, min: o.min, max: o.max, step: o.step });
     if (!state.scan.horizons.includes(o.horizon)) o.horizon = state.scan.horizons.includes(5) ? 5 : state.scan.horizons[0];
     drawScan(out);
   } catch (e) {
@@ -391,7 +433,7 @@ async function loadEvent(ev, detail) {
   const x = state.ex;
   clear(detail).append(h('div', { class: 'block' }, h('span', { class: 'spinner' }), 'Loading candles…'));
   try {
-    x.win = await api('/api/event_window', { config: state.resp.config, ticker: cur().ticker, ma: ev.ma, date: ev.date, direction: ev.direction });
+    x.win = await engine.call('event_window', { config: state.resp.config, ticker: cur().ticker, ma: ev.ma, date: ev.date, direction: ev.direction });
     drawEvent(detail);
   } catch (e) { clear(detail).append(h('div', { class: 'callout warn' }, e.message)); }
 }
@@ -442,7 +484,7 @@ async function renderMethod(root) {
   if (!methodLoaded) {
     clear(root).append(h('div', { class: 'note' }, 'Loading…'));
     try {
-      const html = await (await fetch('/static/method.html')).text();
+      const html = await (await fetch('static/method.html')).text();
       root.innerHTML = html;
       methodLoaded = true;
     } catch { root.textContent = 'Could not load the method page.'; return; }

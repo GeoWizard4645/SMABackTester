@@ -4,7 +4,7 @@ import { cssVar, seriesColor, rgba, fmt, quantile } from './util.js';
 
 const CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'] };
 
-function base(extra = {}) {
+export function base(extra = {}) {
   const ink2 = cssVar('--ink-2'), grid = cssVar('--line');
   const axis = { gridcolor: grid, zerolinecolor: grid, linecolor: grid, tickfont: { color: ink2 }, automargin: true };
   return {
@@ -17,12 +17,12 @@ function base(extra = {}) {
     ...extra,
   };
 }
-const merge = (a, b) => ({ ...a, ...b, xaxis: { ...a.xaxis, ...(b.xaxis || {}) }, yaxis: { ...a.yaxis, ...(b.yaxis || {}) } });
-const draw = (div, traces, layout) => Plotly.react(div, traces, layout, CONFIG);
+export const merge = (a, b) => ({ ...a, ...b, xaxis: { ...a.xaxis, ...(b.xaxis || {}) }, yaxis: { ...a.yaxis, ...(b.yaxis || {}) } });
+export const draw = (div, traces, layout) => Plotly.react(div, traces, layout, CONFIG);
 export const resizeAll = () => document.querySelectorAll('.js-plotly-plot').forEach((d) => Plotly.Plots.resize(d));
 
 export function maColor(ma, mas) { return seriesColor(Math.max(0, mas.indexOf(ma))); }
-const title = (text) => ({ text, x: 0, xanchor: 'left', font: { size: 13, color: cssVar('--ink') } });
+export const title = (text) => ({ text, x: 0, xanchor: 'left', font: { size: 13, color: cssVar('--ink') } });
 
 // ------------------------------------------------------------------ price + events
 export function plotPrice(div, res, opts) {

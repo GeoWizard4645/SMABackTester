@@ -1,0 +1,298 @@
+{
+ "presets": [
+  {
+   "group": "US indices",
+   "items": [
+    {
+     "t": "^GSPC",
+     "n": "S&P 500"
+    },
+    {
+     "t": "^IXIC",
+     "n": "Nasdaq Composite"
+    },
+    {
+     "t": "^DJI",
+     "n": "Dow Jones"
+    },
+    {
+     "t": "^RUT",
+     "n": "Russell 2000"
+    },
+    {
+     "t": "^NDX",
+     "n": "Nasdaq 100"
+    }
+   ]
+  },
+  {
+   "group": "World indices",
+   "items": [
+    {
+     "t": "^FTSE",
+     "n": "FTSE 100"
+    },
+    {
+     "t": "^GDAXI",
+     "n": "DAX"
+    },
+    {
+     "t": "^N225",
+     "n": "Nikkei 225"
+    },
+    {
+     "t": "^HSI",
+     "n": "Hang Seng"
+    },
+    {
+     "t": "^STOXX50E",
+     "n": "Euro Stoxx 50"
+    }
+   ]
+  },
+  {
+   "group": "ETFs & commodities",
+   "items": [
+    {
+     "t": "SPY",
+     "n": "SPDR S&P 500"
+    },
+    {
+     "t": "QQQ",
+     "n": "Invesco QQQ"
+    },
+    {
+     "t": "IWM",
+     "n": "iShares Russell 2000"
+    },
+    {
+     "t": "GLD",
+     "n": "Gold ETF"
+    },
+    {
+     "t": "TLT",
+     "n": "20+yr Treasuries"
+    },
+    {
+     "t": "GC=F",
+     "n": "Gold futures"
+    },
+    {
+     "t": "CL=F",
+     "n": "Crude oil futures"
+    }
+   ]
+  },
+  {
+   "group": "Stocks",
+   "items": [
+    {
+     "t": "AAPL",
+     "n": "Apple"
+    },
+    {
+     "t": "MSFT",
+     "n": "Microsoft"
+    },
+    {
+     "t": "NVDA",
+     "n": "Nvidia"
+    },
+    {
+     "t": "AMZN",
+     "n": "Amazon"
+    },
+    {
+     "t": "GOOGL",
+     "n": "Alphabet"
+    },
+    {
+     "t": "META",
+     "n": "Meta"
+    },
+    {
+     "t": "TSLA",
+     "n": "Tesla"
+    },
+    {
+     "t": "JPM",
+     "n": "JPMorgan"
+    },
+    {
+     "t": "XOM",
+     "n": "Exxon Mobil"
+    },
+    {
+     "t": "KO",
+     "n": "Coca-Cola"
+    }
+   ]
+  },
+  {
+   "group": "Crypto",
+   "items": [
+    {
+     "t": "BTC-USD",
+     "n": "Bitcoin"
+    },
+    {
+     "t": "ETH-USD",
+     "n": "Ethereum"
+    },
+    {
+     "t": "SOL-USD",
+     "n": "Solana"
+    },
+    {
+     "t": "XRP-USD",
+     "n": "XRP"
+    },
+    {
+     "t": "DOGE-USD",
+     "n": "Dogecoin"
+    },
+    {
+     "t": "BNB-USD",
+     "n": "BNB"
+    },
+    {
+     "t": "ADA-USD",
+     "n": "Cardano"
+    },
+    {
+     "t": "LTC-USD",
+     "n": "Litecoin"
+    }
+   ]
+  },
+  {
+   "group": "Sanity check",
+   "items": [
+    {
+     "t": "SYNTHETIC",
+     "n": "Synthetic random walk (no effect by construction)"
+    }
+   ]
+  }
+ ],
+ "defaults": {
+  "tickers": [
+   "^GSPC"
+  ],
+  "start": "1950-01-01",
+  "end": null,
+  "target": 200,
+  "controls": [
+   174
+  ],
+  "ma_type": "sma",
+  "eras": {
+   "mode": "smart",
+   "ends": [
+    1990,
+    2007
+   ],
+   "n": 3
+  },
+  "base_era": null,
+  "late_era": null,
+  "band": 0.5,
+  "breach": 1.5,
+  "approach": 5,
+  "refractory": 10,
+  "atr_window": 14,
+  "horizons": [
+   1,
+   3,
+   5,
+   10
+  ],
+  "breach_basis": "close",
+  "direction": "both",
+  "pre": 5,
+  "post": 10,
+  "bootstrap": 2000,
+  "seed": 42,
+  "plot_horizon": 5
+ },
+ "limits": {
+  "max_tickers": 8,
+  "max_controls": 8,
+  "max_window": 1000,
+  "max_horizons": 8,
+  "max_horizon": 60,
+  "max_bootstrap": 20000,
+  "max_eras": 8,
+  "max_scan_windows": 250
+ },
+ "kalshi": {
+  "defaults": {
+   "series": "KXBTC15M",
+   "source": "auto",
+   "days": 7,
+   "start": null,
+   "end": null,
+   "checkpoints": [
+    14,
+    12,
+    10,
+    8,
+    6,
+    5,
+    4,
+    3,
+    2,
+    1
+   ],
+   "entry_checkpoint": 5,
+   "price_source": "trade",
+   "spot_ref": "checkpoint",
+   "min_price": 20,
+   "max_price": 50,
+   "bin_width": 10,
+   "tails": false,
+   "p_test": "twoprop",
+   "hours": null,
+   "weekdays": null,
+   "contracts": 1,
+   "fee_rate": 0.07,
+   "capital": 1000,
+   "seed": 0,
+   "bias": 3.0,
+   "upside_extra": 2.0,
+   "noise": 2.0,
+   "max_markets": 1500,
+   "rules": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "custom": {
+    "enabled": false,
+    "side": "no",
+    "direction": "",
+    "min": 0,
+    "max": 100
+   },
+   "fee_choice": "taker",
+   "fee_custom": 0.07
+  },
+  "series": {
+   "KXBTC15M": "Bitcoin",
+   "KXETH15M": "Ethereum",
+   "KXSOL15M": "Solana",
+   "KXXRP15M": "XRP",
+   "KXDOGE15M": "Dogecoin",
+   "KXBNB15M": "BNB",
+   "KXHYPE15M": "Hyperliquid"
+  },
+  "examples": {
+   "1 · Sweep entry time: when is the overpricing biggest?": "# Calibration gap and Buy-No result for every checkpoint you extracted.\nrows = []\nfor m in params[\"checkpoints\"]:\n    f = kalshi_data.analysis_frame(raw, m, params[\"price_source\"], params[\"spot_ref\"])\n    t = backtest.run_rule(f, backtest.Rule(\"No on all\", \"no\"), params[\"price_source\"], 1, params[\"fee_rate\"])\n    s = kstats.strategy_metrics(t)\n    rows.append(dict(minutes_before_expiry=m, n=len(f), avg_yes=f.yes_price.mean(),\n                     yes_rate_pct=100 * f.result.mean(), gap_pp=f.yes_price.mean() - 100 * f.result.mean(),\n                     net_usd=s[\"net_profit\"], roi_pct=s[\"roi_pct\"]))\nprint(pd.DataFrame(rows).round(2).to_string(index=False))\n",
+   "2 · Overpricing by hour of day (UTC)": "g = frame.groupby(\"hour\").apply(lambda d: pd.Series({\n    \"n\": len(d), \"avg_yes\": d.yes_price.mean(), \"yes_rate_pct\": 100 * d.result.mean(),\n    \"gap_pp\": d.yes_price.mean() - 100 * d.result.mean()}), include_groups=False)\nprint(g.round(2).to_string())\n",
+   "3 · Fees: how much of the edge do they eat?": "for rate in [0, 0.0175, 0.035, 0.07]:       # none, maker-like, half, taker\n    t = backtest.run_rule(frame, backtest.Rule(\"No on all\", \"no\"), params[\"price_source\"], 1, rate)\n    s = kstats.strategy_metrics(t)\n    print(f\"fee rate {rate:<7} net ${s['net_profit']:>8.2f}   fees ${s['fees']:>7.2f}   ROI {s['roi_pct']:.2f}%\")\nprint(\"\\nFee per contract at each price (cents):\")\nprint({p: backtest.kalshi_fee_cents(p) for p in (5, 10, 25, 50, 75, 90, 95)})\n",
+   "4 · Day-cluster bootstrap CI of the Buy-No edge": "t = backtest.run_rule(frame, backtest.Rule(\"No on all\", \"no\"), params[\"price_source\"], 1, params[\"fee_rate\"])\ndays = pd.to_datetime(t.time).dt.date.to_numpy()\nlo, hi = kstats.day_cluster_bootstrap_mean(t.net.to_numpy(), days, 5000, seed=1)\nprint(f\"mean net per contract: {t.net.mean():.2f}c   95% CI by day-bootstrap: [{lo:.2f}c, {hi:.2f}c]\")\nprint(\"Edge is statistically distinguishable from zero\" if lo > 0 or hi < 0 else \"CI includes zero: no reliable edge\")\n",
+   "5 · Matplotlib: calibration scatter": "import matplotlib.pyplot as plt\ncal = calibration.calibrate(frame, \"all\", width=5, lo=5, hi=95)\nrows = [r for r in cal[\"rows\"] if r[\"count\"]]\nplt.figure(figsize=(5.5, 5.5))\nplt.plot([0, 100], [0, 100], \"--\", color=\"gray\", label=\"fair value\")\nplt.errorbar([r[\"avg_yes\"] for r in rows], [r[\"actual_pct\"] for r in rows],\n             yerr=[[r[\"actual_pct\"] - r[\"ci_lo\"] for r in rows], [r[\"ci_hi\"] - r[\"actual_pct\"] for r in rows]], fmt=\"o-\", capsize=3, label=\"5¢ bins\")\nplt.xlabel(\"Yes price (¢)\"); plt.ylabel(\"actual Yes rate (%)\"); plt.legend(); plt.grid(alpha=.3)\n",
+   "6 · Your own rule: Buy Yes on cheap upside strikes": "rule = backtest.Rule(\"Buy Yes, upside, 10-30c\", side=\"yes\", direction=\"upside\", min_price=10, max_price=30)\nt = backtest.run_rule(frame, rule, params[\"price_source\"], 1, params[\"fee_rate\"])\nprint(kstats.strategy_metrics(t))\n"
+  }
+ }
+}

@@ -1,260 +1,331 @@
 # SMABackTester
 
-A statistical research pipeline that tests whether the **200-day Simple Moving Average (SMA) is a self-fulfilling support/resistance level**.
+An interactive research workbench with two labs, a command-line pipeline behind each, and a website that runs real Python in your browser.
 
 **Authors:** Vivaan Shahani & Ren Yamaki
 
----
+| Lab | Question |
+|-----|----------|
+| **SMA Lab** | Is the 200-day moving average a *self-fulfilling* support/resistance level — i.e. does price react to it more than to a line nobody watches, and more so in the modern era? |
+| **Kalshi 15m Lab** | Do retail traders systematically overprice "Yes" on Kalshi's 15-minute crypto contracts, so that simply buying "No" is profitable after fees? |
 
-## 1. The question
-
-Traders widely watch the 200-day SMA. If enough of them buy when price falls to it and sell when price rises to it, the level could become a real support/resistance zone purely through coordination. This project turns that idea into three testable claims:
-
-| # | Claim | How it is tested |
-|---|-------|------------------|
-| H1 | Price reacts to the 200-day SMA more than to a level that *nobody* watches | 200-day SMA vs. an arbitrary **control SMA** (default 174-day), identical event rules |
-| H2 | "Reaction" means price turns away from the level, not through it | Bounce rate and abnormal forward return, direction-adjusted |
-| H3 | The effect has grown in the modern algorithmic/retail era | Difference-in-differences between Era 3 (2008+) and Era 1 (1950-1990) |
-
-The control SMA is the key design choice. Any moving average will "look like" support in hindsight, because a smoothed price line sits near where price has been. Only the *difference* between the 200-day and a comparable arbitrary SMA says anything about coordination.
-
-The null hypothesis is that the 200-day SMA behaves exactly like the control SMA.
+Live site: **vivaanshahani.com/FinanceProjectTests** (see [Deploying](#3-deploying-to-vivaanshahanicomfinanceprojecttests)).
 
 ---
 
-## 2. Project layout
+## 1. Quick start (local)
 
-| File | Role |
-|------|------|
-| `data.py` | Downloads daily OHLC from Yahoo Finance (`^GSPC` from 1950), caches it to `.cache/`, validates and cleans it. Also loads a user CSV or generates a synthetic null random walk. |
-| `metrics.py` | SMA, True Range, Wilder ATR, distance-to-MA, range-expansion ratios, offset-return matrices. |
-| `events.py` | Event ("touch") detection, de-clustering, and measurement of every reactivity metric for one MA. |
-| `stats.py` | Era segmentation, confidence intervals, two-sample tests, cluster bootstrap, clustered regression. |
-| `report.py` | ASCII console tables. |
-| `plot.py` | `event_study_car.png` and `era_comparison.png`. |
-| `main.py` | `argparse` command-line entry point that wires everything together. |
-
-Data flow: `data` -> `metrics` -> `events` (one run per MA) -> `stats` -> `report` + `plot`.
-
----
-
-## 3. The math
-
-Notation: for trading day $t$, $O_t, H_t, L_t, C_t$ are open, high, low, close. $N$ is the SMA window.
-
-### 3.1 Indicators
-
-**Simple moving average** (includes the current bar):
-
-$$\text{SMA}_t^{(N)} = \frac{1}{N}\sum_{i=0}^{N-1} C_{t-i}$$
-
-**True range and Average True Range** (Wilder smoothing, 14 days):
-
-$$\text{TR}_t = \max\big(H_t - L_t,\; |H_t - C_{t-1}|,\; |L_t - C_{t-1}|\big)$$
-
-$$\text{ATR}_t = \text{ATR}_{t-1} + \tfrac{1}{14}\big(\text{TR}_t - \text{ATR}_{t-1}\big)$$
-
-ATR is only used once 14 observations exist. It converts distances into volatility units, so a "close" approach means the same thing in calm and turbulent markets.
-
-**Distance to the moving average:**
-
-$$d_t = \frac{C_t - \text{SMA}_t}{\text{SMA}_t}, \qquad d^{\text{ATR}}_t = \frac{C_t - \text{SMA}_t}{\text{ATR}_t}$$
-
-**Range expansion** compares event-day volatility with the *previous* 20 days (the event day is excluded from its own baseline):
-
-$$\rho^{\text{ATR}}_t = \frac{\text{ATR}_t}{\frac{1}{20}\sum_{i=1}^{20}\text{ATR}_{t-i}}, \qquad \rho^{\text{TR}}_t = \frac{\text{TR}_t}{\frac{1}{20}\sum_{i=1}^{20}\text{TR}_{t-i}}$$
-
-Wilder ATR moves slowly, so $\rho^{\text{ATR}}$ stays near 1. The raw true-range ratio $\rho^{\text{TR}}$ is reported too because it is a sharper measure of a one-day range blow-out.
-
-### 3.2 Event definition ("touch")
-
-The tolerance band around the SMA is
-
-$$\big[\text{SMA}_t - 0.5\,\text{ATR}_t,\;\; \text{SMA}_t + 0.5\,\text{ATR}_t\big]$$
-
-A touch must be an *approach* from a definite side, so each candidate requires that price had been on one side of the SMA for the previous 5 sessions.
-
-- **Support test (from above):**
-  $C_{t-i} > \text{SMA}_{t-i}$ for all $i = 1,\dots,5$, **and** $L_t \le \text{SMA}_t + 0.5\,\text{ATR}_t$ (the day's low reaches the band or goes through it).
-- **Resistance test (from below):**
-  $C_{t-i} < \text{SMA}_{t-i}$ for all $i = 1,\dots,5$, **and** $H_t \ge \text{SMA}_t - 0.5\,\text{ATR}_t$.
-
-The two cases are mutually exclusive. Let $s_t = +1$ for a support test and $-1$ for a resistance test.
-
-**De-clustering.** Price often hugs an MA for days, producing a string of near-identical events. Candidates are processed in time order and a candidate on day $i$ is accepted only if
-
-$$i - i_{\text{last accepted}} > 10 \text{ trading days}$$
-
-(either direction). This also guarantees the forward windows of consecutive events (up to 10 days) never overlap, which keeps observations closer to independent.
-
-### 3.3 Reactivity metrics
-
-All outcomes are measured from the **close of the event day** $C_t$, so nothing about day $t$'s own outcome leaks into entry.
-
-**Forward return** for horizon $k \in \{1,3,5,10\}$:
-
-$$R_{t\to t+k} = \frac{C_{t+k} - C_t}{C_t}$$
-
-**Abnormal return.** Equities drift upward, so a raw positive return after a support test proves little. Each return is compared against the *unconditional* mean $k$-day return $\mu_k(e)$ over **all** trading days in the same era $e$ (computed once from price alone, so the 200-day and control SMAs share the identical benchmark):
-
-$$\mu_k(e) = \operatorname*{mean}_{s \in e}\; R_{s\to s+k}$$
-
-**Direction-adjusted forward CAR:**
-
-$$\text{CAR}_k = s_t \cdot \big(R_{t\to t+k} - \mu_k(e_t)\big)$$
-
-Multiplying by $s_t$ flips resistance tests, so a **positive CAR always means "price reacted the way a support/resistance level predicts"**, and the two directions can be pooled.
-
-**Bounce.** For a support test, a bounce on horizon $k$ is
-
-$$\mathbb{1}\Big[\,C_{t+k} > C_t \;\wedge\; C_u \ge \text{SMA}_u - 1.5\,\text{ATR}_t \;\;\forall u \in [t, t+k]\,\Big]$$
-
-That is: price finished higher *and* never closed more than 1.5 ATR below the (moving) SMA, so a bounce that only happens after a decisive breakdown does not count. A resistance test mirrors it ($C_{t+k} < C_t$ and $C_u \le \text{SMA}_u + 1.5\,\text{ATR}_t$). The event-day ATR is frozen at $\text{ATR}_t$. If the window runs past the end of the data the bounce is missing (excluded, never counted as a failure). `--breach-basis low` swaps closes for intraday lows/highs.
-
-**Event-study path.** For the trajectory plot, the cumulative return from $t-5$ is
-
-$$\text{AR}_j = \frac{C_{t+j}}{C_{t-5}} - 1 - \mu^{\text{path}}_j(e), \qquad j = -5,\dots,10$$
-
-where $\mu^{\text{path}}_j(e)$ is the same quantity averaged over all days in the era. Panels show support, resistance, and the direction-adjusted pool ($s_t \cdot \text{AR}_j$), with 95% bands $\bar{x} \pm 1.96\,\text{SE}$.
-
-### 3.4 Confidence intervals
-
-- **Bounce rates** use the **Wilson score interval** (well-behaved for small $n$ and rates near 0 or 1). With $\hat p = x/n$ and $z = 1.96$:
-
-$$\frac{\hat p + \frac{z^2}{2n} \pm z\sqrt{\frac{\hat p(1-\hat p)}{n} + \frac{z^2}{4n^2}}}{1 + \frac{z^2}{n}}$$
-
-- **Mean CAR** uses a Student-$t$ interval, $\bar x \pm t_{n-1,\,0.975}\, s/\sqrt{n}$.
-
-### 3.5 Target vs. control (H1)
-
-For each era and each metric, with $\Delta = \bar y_{200} - \bar y_{\text{control}}$:
-
-1. Student two-sample $t$-test (equal variances).
-2. Welch's $t$-test (unequal variances).
-3. Mann-Whitney $U$ test (rank-based, no normality assumption).
-4. **Year-cluster bootstrap** (below).
-
-All $p$-values are two-sided. A positive $\Delta$ is the direction the hypothesis predicts.
-
-**Why a cluster bootstrap?** The first three tests assume the two samples are independent. They are not: both SMAs are tested against the *same* price path, and the 200-day and 174-day SMAs sit close together, so many events coincide. Treating them as independent overstates the variance of $\Delta$, making those tests conservative. Events inside a year are also serially dependent. The cluster bootstrap fixes both:
-
-1. Group events by calendar year (a year keeps both MAs' events together).
-2. Resample whole years with replacement, $B$ times (default 5000).
-3. For each replicate compute $\Delta^*$.
-4. **CI:** the 2.5th and 97.5th percentiles of $\Delta^*$.
-5. **$p$-value**, recentred on the observed difference $\hat\Delta$:
-
-$$p = \frac{1 + \#\{\,|\Delta^* - \hat\Delta| \ge |\hat\Delta|\,\}}{B + 1}$$
-
-### 3.6 Did the effect grow in the modern era? (H3)
-
-The three eras are 1950-1990 (pre-internet, manual execution), 1991-2007 (early electronic trading) and 2008-present (high-frequency and retail coordination).
-
-The estimand is a **difference-in-differences**:
-
-$$\text{DiD} = \underbrace{\big(\bar y_{200} - \bar y_{\text{ctl}}\big)_{\text{Era 3}}}_{\Delta_{E3}} - \underbrace{\big(\bar y_{200} - \bar y_{\text{ctl}}\big)_{\text{Era 1}}}_{\Delta_{E1}}$$
-
-H3 predicts DiD $> 0$. Subtracting the control removes anything that affects *all* moving averages equally in an era (drift, volatility regime, how far price tends to wander). It is estimated two ways:
-
-**(a) Stratified cluster bootstrap.** Years are resampled independently within Era 1 and within Era 3, and DiD$^* = \Delta^*_{E3} - \Delta^*_{E1}$ is formed per replicate, with percentile CI and recentred $p$-value as above.
-
-**(b) Interaction regression** on the pooled events of both MAs:
-
-$$y = \beta_0 + \beta_1 T + \beta_2 E_2 + \beta_3 E_3 + \beta_4 (T\!\cdot\!E_2) + \beta_5 (T\!\cdot\!E_3) + \varepsilon$$
-
-$T = 1$ for the target MA, $E_2, E_3$ are era dummies (Era 1 is the reference). $\beta_5$ is the DiD coefficient. Standard errors are **cluster-robust by calendar year** (CR1):
-
-$$\hat V = \frac{G}{G-1}\cdot\frac{N-1}{N-K}\,(X^\top X)^{-1}\Big(\sum_{g=1}^{G} X_g^\top \hat u_g \hat u_g^\top X_g\Big)(X^\top X)^{-1}$$
-
-with $p$-values from a $t$ distribution on $G-1$ degrees of freedom ($G$ = number of years).
-
----
-
-## 4. Running it
-
-Requires Python 3.10+ and an internet connection for the first download.
+Requires Python 3.10+ (developed on 3.14).
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-python main.py                                   # S&P 500 (^GSPC) from 1950, 200d vs 174d
-python main.py --control 150                     # a different control window
-python main.py --bootstrap 10000 --seed 7        # tighter bootstrap, different seed
-python main.py --ticker BTC-USD                  # Bitcoin
-python main.py --ticker BTC-USD ETH-USD AAPL NVDA  # several assets: one folder each + a roll-up table
-python main.py --ticker ^IXIC --start 1971-02-05 # another index
-python main.py --csv my_prices.csv               # your own OHLC data (first column = date)
-python main.py --synthetic                       # offline smoke test on a no-effect random walk
+python app.py                 # website at http://127.0.0.1:5050
 ```
 
-Downloads are cached in `.cache/` (open-ended requests are refreshed after 24 hours; use `--refresh` to force it).
+Open <http://127.0.0.1:5050>. The header switches between the two labs.
 
-### Options
+Command-line versions (no browser needed):
 
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `--ticker` | `^GSPC` | One or more Yahoo Finance symbols: indices, stocks, ETFs, crypto (`BTC-USD`, `ETH-USD`, ...) |
-| `--era-years END1 END2` | auto | Last year of Era 1 and Era 2 (see "Choosing eras" below) |
-| `--target` / `--control` | 200 / 174 | SMA windows (any integers) |
-| `--band` | 0.5 | Touch band half-width, in ATRs |
-| `--breach` | 1.5 | Bounce-failure distance, in ATRs |
-| `--approach` | 5 | Prior closes that must lie on one side of the SMA |
-| `--refractory` | 10 | De-clustering window (trading days) |
-| `--horizons` | 1 3 5 10 | Forward horizons (days) |
-| `--atr-window` | 14 | ATR period |
-| `--breach-basis` | close | `close`, or `low` (intraday) |
-| `--bootstrap` | 5000 | Bootstrap replications |
-| `--seed` | 42 | Random seed (results are reproducible) |
-| `--plot-horizon` | 5 | Horizon shown in `era_comparison.png` |
-| `--outdir` | `.` | Where PNGs are written (one sub-folder per ticker when several are given) |
-| `--save-events` | off | Also write every event to `events.csv` |
+```bash
+# SMA Lab
+python main.py                                      # S&P 500 from 1950, 200d vs 174d, PNG charts
+python main.py --ticker BTC-USD ETH-USD AAPL        # several assets, one folder each
+python main.py --era-years 1970 1990 2010           # four custom eras
 
-### Output
+# Kalshi Lab
+python kalshi_lab/main.py --entry-checkpoint 5m --min-price 20 --max-price 50
+python kalshi_lab/main.py --source synthetic --bias 0     # a perfectly calibrated null market
+python kalshi_lab/main.py --series KXETH15M --days 14 --price-source executable
 
-**Console** (six ASCII tables): (1) events per MA, era and direction; (2) bounce rates with 95% CIs; (3) mean CAR and standard deviation; (4) target-vs-control tests per era and horizon; (5) range expansion; (6) the Era 3 vs. Era 1 difference-in-differences.
+# Tests
+pytest -q tests
+```
 
-With several tickers, a final **cross-asset summary** lists, for each asset, the full-sample 200-minus-control gap in bounce rate and CAR (with bootstrap $p$-values) and the Era 3 vs. Era 1 difference-in-differences $p$-value.
-
-### Choosing eras
-
-The default eras (1950-1990, 1991-2007, 2008-present) describe the US equity market. They are used whenever the data starts in 1980 or earlier. For assets with a shorter history (Bitcoin starts in 2014, Ethereum in 2017) the history is instead **split into three eras of equal calendar length** and the chosen boundaries are printed at the top of each report. You can set them yourself, e.g. `--era-years 2019 2022`, which gives Era 1 = start-2019, Era 2 = 2020-2022, Era 3 = 2023-present.
-
-### Stocks, ETFs and crypto: what changes
-
-- **Any Yahoo Finance symbol works.** Prices are split/dividend-adjusted (`auto_adjust=True`), so high, low and close stay consistent.
-- **Crypto trades 24/7.** Every calendar day is a bar, so a 200-bar SMA spans 200 *calendar* days (about 29 weeks instead of about 40), and the horizons (1/3/5/10) and the 10-bar de-clustering window are calendar days too. The report prints a note when it detects a crypto ticker.
-- **The baseline adapts.** Abnormal returns subtract the unconditional mean return *of the same asset and era*, so a huge crypto bull-market drift is removed rather than counted as "support".
-- **Short histories are fragile.** Newer assets have few events and few calendar years per era, which makes the year-cluster bootstrap and clustered OLS unreliable (they can print spuriously small $p$-values). The report prints a warning for any asset with under 20 years of data.
-
-**Figures:**
-- `event_study_car.png`: average abnormal cumulative return from $t-5$ to $t+10$ around touches, 200-day vs. control.
-- `era_comparison.png`: bounce rate and CAR by era, plus the 200-minus-control gap with bootstrap CIs.
+> macOS note: port 5000 is taken by AirPlay Receiver, so the dev server defaults to **5050**.
 
 ---
 
-## 5. Validation
+## 2. How it is built
 
-The pipeline was checked on 60 simulated random walks (GARCH volatility, 1950-2025) that contain **no** moving-average effect, so about 5% of tests should reject at the 5% level:
+```
+                ┌───────────────────────── browser ─────────────────────────┐
+ static page ──►│  index.html + static/js/*  (Plotly charts, KaTeX math)     │
+ (any host)     │        │                                                    │
+                │        ▼  engine.js picks an engine                         │
+                │  ┌───────────────┐         ┌───────────────────────────┐   │
+                │  │ server engine │   or    │ browser engine            │   │
+                │  │ python app.py │         │ Web Worker + Pyodide      │   │
+                │  │ (native, fast)│         │ (the SAME .py files, run  │   │
+                │  └───────────────┘         │  in WebAssembly)          │   │
+                └─────────────────────────── └───────────┬───────────────┘ ──┘
+                                                         │ fetches data through
+                                                         ▼
+                              same-origin proxy  /api/proxy/{yahoo,kalshi,coinbase}
+                              (cloudflare/worker.js in production, app.py locally)
+```
+
+* **One Python code base, two ways to run it.** `service.py` / `kalshi_lab/web.py` turn a JSON config into JSON results. `app.py` calls them natively; the public site loads the identical files into Pyodide (Python 3.14 + pandas + SciPy compiled to WebAssembly) inside a Web Worker. Results agree to the last digit across engines.
+* **Static hosting works.** The production site is only static files plus a tiny data proxy — no Python server. Every URL in the page is relative, so it works under any sub-path such as `/FinanceProjectTests/`.
+* **Why a proxy?** Browsers cannot call Yahoo Finance directly (no CORS headers), and Kalshi answers `403` to any request carrying a browser `Origin` header. The proxy forwards a small allowlist of read-only `GET` requests from the server side.
+
+---
+
+## 3. Deploying to vivaanshahani.com/FinanceProjectTests
+
+The site is **static files + one Cloudflare Worker (the data proxy)**.
+
+### Step 1 — build the site folder
+
+```bash
+python build_static.py
+```
+
+This produces:
+
+```
+dist/
+  FinanceProjectTests/     <- the website folder (index.html, static/, py/)
+  cloudflare/              <- worker.js, wrangler.toml, test_worker.mjs
+  functions/               <- the same proxy as a Cloudflare *Pages Function* (alternative to the Worker)
+```
+
+Rehearse production locally (static files under the exact sub-path, in-browser Python, proxy only):
+
+```bash
+python serve_dist.py        # http://127.0.0.1:5001/FinanceProjectTests/
+```
+
+### Step 2 — publish the folder
+
+Copy `dist/FinanceProjectTests/` into your website project so that `FinanceProjectTests/index.html` sits at the site root, then deploy the site as you normally do (Cloudflare Pages, git push, etc.). Visiting `/FinanceProjectTests` without the trailing slash is redirected for you.
+
+### Step 3 — deploy the proxy (pick **one**)
+
+**A. Cloudflare Worker (recommended — works whatever hosts the static files)**
+
+```bash
+cd dist/cloudflare            # or ./cloudflare in the repo
+npx wrangler login
+npx wrangler deploy
+```
+
+`wrangler.toml` binds the Worker to the route `vivaanshahani.com/FinanceProjectTests/api/proxy/*` (the zone must be on your Cloudflare account). If you use a different path, change `BASE` in `worker.js` and the route in `wrangler.toml` together.
+
+**B. Cloudflare Pages Function** — if the site is a Pages project, copy `dist/functions/` into the project root. It serves the same route from the same code.
+
+### Step 4 — verify
+
+1. Open `https://vivaanshahani.com/FinanceProjectTests/` and press **Run the default test**. The first visit downloads the Python runtime (~30 MB from the jsDelivr CDN; cached afterwards).
+2. In DevTools → Network you should see `api/proxy/yahoo?...` return JSON.
+3. Test the proxy logic against the live APIs: `node cloudflare/test_worker.mjs` (10 checks).
+4. Switch to **Kalshi 15m Lab** and run a study with the *Live Kalshi only* source.
+
+### Things to know
+
+* **Upstream blocking is the main risk.** Yahoo and Kalshi may treat Cloudflare's IP ranges differently from a laptop. I could verify the proxy from a normal network but not from Cloudflare's. If Yahoo blocks you, upload a CSV in the SMA Lab ("Upload CSV…"); the Kalshi lab's default *auto* source falls back to a clearly labelled synthetic dataset instead of failing.
+* **Content-Security-Policy.** If the site sets a CSP it must allow `cdn.jsdelivr.net` and `cdn.plot.ly` for scripts, `connect-src` to `cdn.jsdelivr.net`, `worker-src 'self'`, and `script-src 'wasm-unsafe-eval'` (WebAssembly).
+* **Third-party CDNs** are used for Plotly, KaTeX and Pyodide. Pin or self-host them if you need offline or locked-down operation.
+* **Rate limits.** The Worker caches responses (Yahoo 1 h, Kalshi 60 s, Coinbase 5 min), which keeps repeated runs cheap.
+* **Updating.** Re-run `python build_static.py` and re-publish the folder; the Worker only changes if `cloudflare/worker.js` does.
+
+---
+
+## 4. SMA Lab
+
+### 4.1 The question
+
+Traders widely watch the 200-day SMA. If enough of them buy at it and sell at it, it could become a real support/resistance level through coordination alone. Three claims are tested:
+
+| # | Claim | How |
+|---|-------|-----|
+| H1 | Price reacts to the target line more than to a line nobody watches | Identical event rules for the target and one or more **control lines** |
+| H2 | "Reacts" means turning away from the line, not through it | Bounce rate and direction-adjusted abnormal return |
+| H3 | The effect is stronger in the modern algorithmic/retail era | Difference-in-differences between a late and an early era |
+
+The control line is the key design choice. Any smoothed line looks like support in hindsight; only the *difference* from a comparable arbitrary line says anything about coordination. The null hypothesis is that the target behaves exactly like the control.
+
+### 4.2 What you can change in the website
+
+| Area | Controls |
+|------|----------|
+| Assets | Any Yahoo Finance symbol, presets (indices, ETFs, stocks, crypto), a synthetic no-effect series, or your own uploaded CSV; any date range |
+| Lines | A target window and its type (SMA / EMA / WMA); up to 8 control windows; random controls; a **line scan** of every window from 2 to 1000 |
+| Eras | **Smart** (default regimes if the history reaches back to 1980, else equal thirds), **Custom** (any number of boundary years, 2–8 eras), or **Equal slices**; choose which two eras the "did it grow?" test compares |
+| Event rules | Touch band, breach distance, approach length, de-clustering gap, ATR window, plot window, any set of forward horizons, breach test on closes or intraday, support only / resistance only / both |
+| Statistics | Bootstrap replications and seed |
+
+Tabs: **Overview** (plain-language verdicts + scoreboard), **Price & events**, **Event study**, **Eras**, **Tables** (CSV export), **Line scan**, **Event explorer** (click any event to see candles and the definition checked step by step), and **Method & math**.
+
+### 4.3 The math
+
+Notation: for bar $t$, $O_t, H_t, L_t, C_t$ are open, high, low, close; $N$ is the line's window.
+
+**Moving averages** (all include the current bar):
+
+$$\text{SMA}_t=\frac1N\sum_{i=0}^{N-1}C_{t-i},\qquad \text{EMA}_t=\alpha C_t+(1-\alpha)\text{EMA}_{t-1}\ \ (\alpha=\tfrac{2}{N+1}),\qquad \text{WMA}_t=\frac{\sum_{i=0}^{N-1}(N-i)C_{t-i}}{N(N+1)/2}$$
+
+**True range and ATR** (Wilder, 14 bars):
+
+$$\text{TR}_t=\max\big(H_t-L_t,\ |H_t-C_{t-1}|,\ |L_t-C_{t-1}|\big),\qquad \text{ATR}_t=\text{ATR}_{t-1}+\tfrac1{14}(\text{TR}_t-\text{ATR}_{t-1})$$
+
+ATR turns distances into volatility units, so "close to the line" means the same in calm and wild markets.
+
+**Distance and range expansion:**
+
+$$d_t=\frac{C_t-\text{MA}_t}{\text{MA}_t},\quad d^{\text{ATR}}_t=\frac{C_t-\text{MA}_t}{\text{ATR}_t},\quad \rho^{\text{TR}}_t=\frac{\text{TR}_t}{\frac1{20}\sum_{i=1}^{20}\text{TR}_{t-i}}$$
+
+The baseline excludes the event day itself.
+
+**Touch events.** The band is $[\text{MA}_t-b\,\text{ATR}_t,\ \text{MA}_t+b\,\text{ATR}_t]$ ($b=0.5$). A touch must be an approach from a definite side, so each candidate requires the previous $m=5$ closes on one side of the line:
+
+- *Support test:* $C_{t-i}>\text{MA}_{t-i}$ for $i=1..m$ **and** $L_t\le \text{MA}_t+b\,\text{ATR}_t$
+- *Resistance test:* $C_{t-i}<\text{MA}_{t-i}$ for $i=1..m$ **and** $H_t\ge \text{MA}_t-b\,\text{ATR}_t$
+
+Let $s_t=+1$ for support and $-1$ for resistance.
+
+**De-clustering.** Candidates are processed in time order and accepted only if $i-i_{\text{last accepted}}>R$ ($R=10$). This also stops forward windows from overlapping.
+
+**Reaction metrics** (all from the close of the event day $C_t$, so nothing about that day's own outcome leaks into entry):
+
+$$R_{t\to t+k}=\frac{C_{t+k}-C_t}{C_t},\qquad \mu_k(e)=\underset{s\in e}{\text{mean}}\,R_{s\to s+k},\qquad \text{CAR}_k=s_t\big(R_{t\to t+k}-\mu_k(e_t)\big)$$
+
+$\mu_k(e)$ is the average $k$-bar return over *all* bars of the same asset and era (it removes drift, and the target and every control share it). Multiplying by $s_t$ makes **positive always mean "reacted the way a support/resistance level predicts"**, so directions can be pooled.
+
+$$\text{Bounce (support)}=\mathbb 1\Big[C_{t+k}>C_t\ \wedge\ C_u\ge\text{MA}_u-\beta\,\text{ATR}_t\ \ \forall u\in[t,t+k]\Big],\quad\beta=1.5$$
+
+Resistance mirrors it. A window running past the end of the data gives a *missing* bounce, never a failure. For the event-study chart, $\text{AR}_j=C_{t+j}/C_{t-5}-1-\mu^{\text{path}}_j(e)$ for $j=-5..10$.
+
+**Confidence intervals.** Bounce rates use the Wilson score interval ($\hat p=x/n$, $z=1.96$):
+
+$$\frac{\hat p+\frac{z^2}{2n}\pm z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^2}}}{1+\frac{z^2}{n}}$$
+
+and mean CAR uses a Student-$t$ interval.
+
+**Target vs control.** For each era and metric, with $\Delta=\bar y_{\text{target}}-\bar y_{\text{control}}$: Student's $t$, Welch's $t$, Mann-Whitney $U$ and a **year-cluster bootstrap**. The first three assume independent samples, which is false here (both lines see the same prices and share events), so they are *conservative* — on simulated no-effect data they reject only about 1% of the time at a nominal 5%. The bootstrap:
+
+1. Group events by calendar year (a year keeps both lines' events together).
+2. Resample whole years with replacement $B$ times; compute $\Delta^*$ each time.
+3. CI = 2.5th and 97.5th percentiles of $\Delta^*$; recentred p-value $p=\dfrac{1+\#\{|\Delta^*-\hat\Delta|\ge|\hat\Delta|\}}{B+1}$.
+
+With fewer than 5 distinct years it returns *n/a* rather than a meaningless number. On 60 simulated no-effect histories it rejects 5–9% at a nominal 5% (slightly liberal when an era has few years).
+
+**Did the effect grow?** A difference-in-differences between the early and late era you pick:
+
+$$\text{DiD}=\underbrace{(\bar y_{\text{target}}-\bar y_{\text{control}})_{\text{late}}}_{\Delta_{\text{late}}}-\underbrace{(\bar y_{\text{target}}-\bar y_{\text{control}})_{\text{early}}}_{\Delta_{\text{early}}}$$
+
+estimated by a stratified cluster bootstrap and by a pooled regression with cluster-robust (CR1) errors:
+
+$$y=\beta_0+\beta_1T+\textstyle\sum_{e}\gamma_e E_e+\sum_{e}\delta_e\,(T\!\cdot\!E_e)+\varepsilon,\qquad \hat V=\tfrac{G}{G-1}\tfrac{N-1}{N-K}(X^\top X)^{-1}\Big(\sum_g X_g^\top\hat u_g\hat u_g^\top X_g\Big)(X^\top X)^{-1}$$
+
+The late-era interaction $\delta$ is the DiD; $p$-values use $t_{G-1}$ with calendar years as clusters.
+
+**Line scan.** Runs the same event study for every window in a range and ranks the target among them: empirical $p=\dfrac{1+\#\{\text{other lines}\ge\text{target}\}}{M+1}$ (neighbouring lines excluded; still only a rough guide because nearby lines share events).
+
+### 4.4 Validation
+
+Calibrated on 60 simulated random walks with no effect (about 5% of tests should reject):
 
 | Test | False-positive rate |
 |------|--------------------|
-| Student / Welch / Mann-Whitney | about 1% (too conservative: samples are not independent) |
-| Year-cluster bootstrap | 5-9% (slightly liberal when an era has few years) |
-| Era-expansion bootstrap / clustered OLS | 5.4-6.7% |
+| Student / Welch / Mann-Whitney | ≈ 1% (conservative) |
+| Year-cluster bootstrap | 5–9% |
+| Era-expansion bootstrap / clustered OLS | 5.4–6.7% |
 
-Run `python main.py --synthetic` to see the same kind of null output.
+The browser (Pyodide) and server engines were checked to produce identical events, tables and scan results.
 
 ---
 
-## 6. Limitations and caveats
+## 5. Kalshi 15m Lab
 
-- **Multiple testing.** Roughly 56 tests are reported with no correction; a few $p < 0.05$ results are expected by chance. A lone significant cell is weak evidence.
-- **Few events.** Each era has only tens to a couple of hundred events per MA, so confidence intervals are wide and power is low for small effects.
-- **Old data quality.** `^GSPC` before about 1962 has no true intraday high/low (they equal the close), so ATR and touch detection in Era 1 are close-to-close approximations.
-- **Drift.** Bounce rates above 50% for support tests partly reflect equity drift. Only the 200-minus-control difference speaks to the hypothesis.
-- **Parameter choices.** Interpretations of "prior 5-day close above", the refractory rule and the breach test are documented in `events.py` and are configurable, but results can move with them.
-- **One asset at a time.** Each asset is tested separately. A null on one index does not rule out effects elsewhere, and a positive result would not prove the *mechanism* is trader coordination. When scanning many assets, the multiple-testing problem multiplies: out of 20 assets, one "significant" result is expected by chance.
-- **Short histories.** Crypto and recently listed stocks have few years per era; see "Stocks, ETFs and crypto" above.
-- **Not investment advice.** This is a research tool, not a trading strategy; it ignores costs, slippage and position sizing.
+### 5.1 The question
+
+Kalshi's 15-minute crypto contracts ask *"will the price at expiry be at or above where it started?"* If retail traders are systematically optimistic, **Yes** trades above its true probability, and buying **No** on every contract would profit even after fees. Three tests:
+
+1. **Overpricing** — when "Yes" trades at $P$, does it win less than $P\%$ of the time?
+2. **Asymmetry** — is the bias stronger on upside strikes (BTC must rise) than downside strikes?
+3. **Strategy** — would "Buy No" make money after Kalshi's fees?
+
+### 5.2 Data
+
+| Source | Used for |
+|--------|----------|
+| Kalshi public API (`/markets`, batch `/markets/candlesticks`, `/historical/*`) | Settled contracts: strike, open/close time, result; 1-minute last-trade / bid / ask candles |
+| Coinbase Exchange 1-minute candles | Spot, used only to decide whether the strike is above or below spot |
+| Synthetic generator | Same schema as live data; Yes price = model-fair probability + an **assumed** optimism premium (set to 0 for a calibrated null). Planted by assumption — not evidence about the real market |
+
+At each checkpoint "N minutes before expiry" the lab takes the latest known trade price, bid and ask (forward-filled, discarded if older than 3 minutes). Kalshi's batch-candle endpoint rejects any request where *tickers × minutes spanned > 10,000*, so markets are batched greedily under that budget.
+
+### 5.3 Definitions
+
+**Calibration.** Contracts are binned by Yes price. In each bin the implied probability is the mean Yes price $\bar P$ and the realised rate is $\hat p$:
+
+$$\text{gap}=\bar P-100\,\hat p\qquad(\text{positive}\Rightarrow\text{Yes overpriced})$$
+
+The p-value tests $\hat p=\bar P/100$. Three tests are offered: the **two-proportion z-test** (the form the study specifies; it treats the implied rate as a second sample of size $n$, which inflates variance, so it is conservative), an **exact binomial test**, and a **Poisson-binomial z-test** that holds each contract to its *own* price and is the most powerful:
+
+$$z=\frac{\sum_i y_i-\sum_i p_i}{\sqrt{\sum_i p_i(1-p_i)}}$$
+
+Realised-rate error bars are Wilson intervals.
+
+**Upside vs downside.** In the live `KXBTC15M` series the strike *is* the BTC reference price at market open, so "strike vs spot at open" is essentially noise. The lab therefore defaults to comparing the strike with spot **at the entry checkpoint** ($K>S$ = upside; $K<S$ = downside) and offers the open-based split as an option. Because upside strikes are nearly always cheap out-of-the-money Yes contracts and downside ones expensive, the raw comparison is confounded with the favourite–longshot bias; a **price-matched** comparison (Yes priced 40–60¢) is reported alongside it. Per contract the overpricing residual is $r_i=P_i/100-y_i$, and the groups' means are compared with Welch's test.
+
+**Buy-No backtest.** Entry: buy one No at $100-P_{\text{yes}}$ cents at the checkpoint (or, with *executable* pricing, at its ask $100-\text{bid}_{\text{yes}}$). Payout: 100¢ if the market settles No, else 0. Kalshi's taker fee is charged on entry:
+
+$$\text{fee}=\Big\lceil 0.07\times C\times P(1-P)\Big\rceil\text{ dollars},\ P\in[0,1]\qquad(\text{one contract at }50¢:\ \lceil 0.07\times0.25\times100\rceil=2¢)$$
+
+The fee is symmetric in $P$. A trade profits only if the win rate exceeds the break-even rate $(\text{entry}+\text{fee})/100$.
+
+| Rule | Description |
+|------|-------------|
+| 1 | Buy No on every contract |
+| 2 | Buy No on upside strikes only |
+| 3 | Buy No only when Yes is priced between a lower and upper bound (default 20–50¢) |
+| custom | Any side, strike direction and price range you choose |
+
+Metrics: **ROI** = net profit ÷ capital deployed (entry cost + fees); **profit factor** = winning ÷ losing trades after fees; **max drawdown** = largest peak-to-trough fall of cumulative net profit; **Sharpe** from daily profit with $\sqrt{365}$; a one-sample $t$-test of mean net profit per trade; and a **day-cluster bootstrap** CI (whole days resampled, since trades within a day are dependent).
+
+### 5.4 What you can change in the website
+
+Data source (live / auto / synthetic), which 15-minute market (BTC, ETH, SOL, XRP, DOGE, BNB, HYPE), number of days or exact dates, **timing** (which checkpoints to extract, the entry checkpoint, expiry hours in UTC, weekdays), price used (last trade / midpoint / executable), upside-vs-downside reference, bin width, tails, p-value test, the three rules plus a custom rule, contracts per trade, fee schedule (taker / half / maker-like / none / custom), capital, and the synthetic-data knobs.
+
+**Python console tab.** Real Python in the browser with `raw`, `frame`, `params`, `trades`, `pd`, `np`, and the lab's modules preloaded. Six runnable examples (entry-time sweep, hour-of-day, fee sensitivity, bootstrap CI, matplotlib plot, custom rule); edit and run (Ctrl/⌘+Enter). Packages such as matplotlib load on first import.
+
+### 5.5 Caveats
+
+* **Small samples.** A week is ≈ 670 contracts spread over bins and splits. A bin of 25 contracts has a ±20 pp interval; apparent overpricing there is mostly noise.
+* **Many tests.** Splits × bins × rules multiply false positives. Do not tune the checkpoint, price range and rule until something works.
+* **Execution.** Trading at a last-trade price ignores paying the ask — try *executable*. Market impact and queue position are ignored.
+* **Settlement index.** Kalshi settles on CF Benchmarks' BRTI; Coinbase spot differs slightly, which only affects the upside/downside split.
+* **Regime.** A few days of crypto data say little about other conditions.
+* **Not financial advice.**
+
+---
+
+## 6. Project layout
+
+| Path | Role |
+|------|------|
+| `main.py`, `data.py`, `metrics.py`, `events.py`, `stats.py`, `plot.py`, `report.py` | SMA research pipeline (CLI): data & cache, indicators, event detection, statistics, charts, console tables |
+| `service.py` | JSON-in / JSON-out layer used by the web app (validation, analysis, event window, line scan) |
+| `app.py` | Local Flask server: static page, native analysis API, data proxy, Python sources |
+| `bridge.py` | Dispatch layer the browser worker calls |
+| `appmeta.py` | Ticker presets, list of Python files for the browser, proxy allowlist |
+| `kalshi_lab/` | `kalshi_data.py`, `calibration.py`, `backtest.py`, `stats.py`, `plot.py`, `main.py` (CLI), `web.py` (browser entry points + console), `requirements.txt` |
+| `static/` | `index.html`, `style.css`, `method.html`, `js/` (`main`, `kalshi`, `controls`, `charts`, `tables`, `engine`, `pyworker`, `util`) |
+| `cloudflare/` | `worker.js` (data proxy), `wrangler.toml`, `test_worker.mjs` |
+| `build_static.py`, `serve_dist.py` | Build the deployable folder; serve it under the production sub-path |
+| `tests/` | 28 pytest tests (indicators, events, statistics, fees, backtest arithmetic, API validation, end-to-end) |
+
+---
+
+## 7. Limitations (both labs)
+
+* **Multiple testing.** Dozens of p-values are shown with no correction; about 1 in 20 will cross 0.05 by luck.
+* **Few events / short histories.** Cluster methods are unreliable below ~10 years per era and are switched off below 5.
+* **Old data.** The S&P 500 index before ~1962 has no true intraday high/low, so ATR and touches there are close-to-close approximations.
+* **24/7 markets.** For crypto an $N$-bar line spans $N$ calendar days.
+* **Free data.** Yahoo Finance prices (split/dividend adjusted) with only basic cleaning.
+* **Not investment advice.** Research tools only; costs, slippage and position sizing are not modelled.

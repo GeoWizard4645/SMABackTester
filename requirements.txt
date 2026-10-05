@@ -1,5 +1,9 @@
+# Core research pipeline (CLI)
 yfinance>=0.2.40
 pandas>=2.0
 numpy>=1.24
 scipy>=1.10
 matplotlib>=3.7
+# Local web server (python app.py) and the Kalshi study
+flask>=3.0
+requests>=2.31

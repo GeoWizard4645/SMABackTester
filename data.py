@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import io
+import json
 import re
+import sys
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
 
 REQUIRED_COLUMNS = ["Open", "High", "Low", "Close"]
 CACHE_MAX_AGE_HOURS = 24.0
+IS_BROWSER = sys.platform == "emscripten"  # running inside Pyodide
+PROXY_BASE: str | None = None  # same-origin data proxy used in the browser (set by the worker)
+UPLOADS: dict[str, pd.DataFrame] = {}  # user-uploaded series, keyed by pseudo-ticker
 
 
 def _cache_path(cache_dir: Path, ticker: str, start: str, end: str | None) -> Path:
@@ -41,7 +48,54 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def parse_yahoo_chart(payload: dict) -> pd.DataFrame:
+    """Daily OHLC from a Yahoo ``v8/finance/chart`` JSON payload, split/dividend adjusted.
+
+    Mirrors yfinance's ``auto_adjust=True``: every price is scaled by adjclose / close.
+    """
+    chart = payload.get("chart") or {}
+    if chart.get("error") or not chart.get("result"):
+        err = chart.get("error") or {}
+        raise RuntimeError(f"Yahoo returned no data: {err.get('description') or 'unknown symbol or empty range'}")
+    res = chart["result"][0]
+    ts = res.get("timestamp") or []
+    if not ts:
+        raise RuntimeError("Yahoo returned an empty price history")
+    quote = res["indicators"]["quote"][0]
+    offset = int((res.get("meta") or {}).get("gmtoffset") or 0)
+    idx = pd.to_datetime(np.asarray(ts, dtype="int64") + offset, unit="s")
+    df = pd.DataFrame({"Open": quote["open"], "High": quote["high"], "Low": quote["low"], "Close": quote["close"]},
+                      index=idx).apply(pd.to_numeric, errors="coerce")
+    adj = (res["indicators"].get("adjclose") or [{}])[0].get("adjclose")
+    if adj:
+        factor = pd.to_numeric(pd.Series(adj, index=idx), errors="coerce") / df["Close"]
+        factor = factor.where(np.isfinite(factor), 1.0)
+        for col in REQUIRED_COLUMNS:
+            df[col] = df[col] * factor
+    return _clean(df)
+
+
+def _download_via_proxy(ticker: str, start: str, end: str | None) -> pd.DataFrame:
+    if not PROXY_BASE:
+        raise RuntimeError("no data proxy configured")
+    from pyodide.http import open_url  # type: ignore
+
+    p1 = int(pd.Timestamp(start).timestamp())
+    p2 = int(pd.Timestamp(end).timestamp()) if end else int(time.time()) + 86400
+    url = f"{PROXY_BASE}/yahoo?" + urlencode({"symbol": ticker, "period1": p1, "period2": p2})
+    body = open_url(url).read()
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise RuntimeError("the data proxy returned a non-JSON response") from None
+    if "error" in payload and "chart" not in payload:
+        raise RuntimeError(f"data proxy error: {payload['error']}")
+    return parse_yahoo_chart(payload)
+
+
 def download_prices(ticker: str, start: str, end: str | None) -> pd.DataFrame:
+    if IS_BROWSER:
+        return _download_via_proxy(ticker, start, end)
     import yfinance as yf
 
     raw = yf.download(
@@ -58,6 +112,17 @@ def download_prices(ticker: str, start: str, end: str | None) -> pd.DataFrame:
             "Check the ticker/network, or use --csv / --synthetic."
         )
     return _clean(raw)
+
+
+def register_upload(name: str, csv_text: str) -> str:
+    """Store an uploaded OHLC CSV (first column = date) and return its pseudo-ticker."""
+    safe = re.sub(r"[^A-Za-z0-9]+", "-", name.rsplit(".", 1)[0]).strip("-")[:14] or "DATA"
+    ticker = f"UPLOAD-{safe}".upper()
+    df = _clean(pd.read_csv(io.StringIO(csv_text), index_col=0, parse_dates=True))
+    if len(df) < 50:
+        raise ValueError("the CSV needs at least 50 daily rows with Open, High, Low, Close columns")
+    UPLOADS[ticker] = df
+    return ticker
 
 
 def load_prices(

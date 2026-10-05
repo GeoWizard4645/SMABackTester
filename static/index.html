@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SMA Lab</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/static/style.css">
+<!-- The site lives under a sub-path (e.g. /FinanceProjectTests/). Every URL below is relative, so make sure the
+     page itself is addressed with a trailing slash, otherwise "static/..." would resolve against the parent folder. -->
+<script>if (!/\/$|\.[A-Za-z0-9]+$/.test(location.pathname)) location.replace(location.pathname + '/' + location.search + location.hash);</script>
+<link rel="stylesheet" href="static/style.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 </head>
 <body>
@@ -19,13 +22,19 @@
       <p class="tagline">Is the 200-day moving average really a support/resistance level?</p>
     </div>
   </div>
+  <nav class="viewnav" id="viewnav" aria-label="Lab">
+    <button type="button" data-view="sma" class="active">SMA Lab</button>
+    <button type="button" data-view="kalshi">Kalshi 15m Lab <span class="beta">Python</span></button>
+  </nav>
   <div class="top-actions">
+    <span class="pystatus" id="py-status" hidden></span>
     <button class="btn ghost" id="share-btn" title="Copy a link that restores every setting">Copy share link</button>
     <button class="btn ghost" id="export-btn" title="Download the full results as JSON" disabled>Export JSON</button>
     <button class="btn ghost" id="theme-btn" title="Toggle light / dark">Theme</button>
   </div>
 </header>
 
+<div id="view-sma">
 <div class="layout">
   <aside class="sidebar" id="sidebar">
     <div class="side-scroll">
@@ -43,6 +52,10 @@
             <summary>Browse presets (indices, stocks, crypto…)</summary>
             <div id="preset-groups"></div>
           </details>
+          <div class="row" style="margin-top:8px">
+            <label class="btn tiny" for="csv-upload" title="Use your own daily OHLC data (first column = date; needs Open, High, Low, Close)">Upload CSV…</label>
+            <input id="csv-upload" type="file" accept=".csv,text/csv" hidden>
+          </div>
           <div class="grid2">
             <div><label class="lbl" for="start">Start</label><input id="start" type="date"></div>
             <div><label class="lbl" for="end">End <span class="hint">(blank = today)</span></label><input id="end" type="date"></div>
@@ -193,10 +206,12 @@
     <section class="panel" id="tab-method"></section>
   </main>
 </div>
+</div>
+<div id="view-kalshi" hidden></div>
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<script type="module" src="/static/js/main.js"></script>
+<script type="module" src="static/js/main.js"></script>
 </body>
 </html>

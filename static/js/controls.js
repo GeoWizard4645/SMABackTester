@@ -31,7 +31,7 @@ function normTicker(t) {
   if (t.toLowerCase() === 'synthetic') return 'SYNTHETIC';
   return t.startsWith('^') || /[=\-.]/.test(t) || t === t.toUpperCase() ? t.toUpperCase() : t.toUpperCase();
 }
-function addTicker(raw) {
+export function addTicker(raw) {
   for (const part of raw.split(/[\s,;]+/).filter(Boolean)) {
     const t = normTicker(part);
     if (!TICKER_RE.test(t)) { toast(`“${part}” is not a valid symbol`); continue; }
